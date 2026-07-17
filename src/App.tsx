@@ -29,6 +29,7 @@ import { InformesNominaPage } from '@/pages/nomina/InformesNominaPage'
 import { UsuariosPage } from '@/pages/usuarios/UsuariosPage'
 import { InformesPage } from '@/pages/powerbi/InformesPage'
 import { NoAccessPage } from '@/pages/NoAccessPage'
+import { ToastProvider } from '@/components/ui'
 import type { ReactNode } from 'react'
 
 /** Redirige al panel si ya hay sesión (para /login, /recuperar, etc.). */
@@ -85,15 +86,17 @@ function AppRoutes() {
 export default function App() {
   return (
     <AccessibilityProvider>
-      <AuthProvider>
-        <DataProvider>
-          <MaterialesProvider>
-            <BrowserRouter>
-              <AppRoutes />
-            </BrowserRouter>
-          </MaterialesProvider>
-        </DataProvider>
-      </AuthProvider>
+      <ToastProvider>
+        <AuthProvider>
+          <DataProvider>
+            <MaterialesProvider>
+              <BrowserRouter>
+                <AppRoutes />
+              </BrowserRouter>
+            </MaterialesProvider>
+          </DataProvider>
+        </AuthProvider>
+      </ToastProvider>
     </AccessibilityProvider>
   )
 }

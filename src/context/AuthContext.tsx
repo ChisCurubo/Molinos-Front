@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { User } from '@/types'
 import { seedUsers } from '@/data/seed'
+import { authApi } from '@/api/auth'
 
 interface StoredUser extends User {
   password: string
@@ -70,7 +71,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback<AuthContextValue['login']>(
     async (email, password) => {
-      await new Promise((r) => setTimeout(r, 350)) // simula latencia de red
+      // Intentar autenticación real con el backend
+      try {
+        const username = email.includes('@') ? email.split('@')[0] : email
+        const response = await authApi.login(username, password)
+        const token = response.token
+        localStorage.setItem('token', token)
+        // Construir User desde la respuesta o usar seed como fallback de datos del perfil
+        const apiUser = response.user
+        const seedMatch = users.find(u => u.email.toLowerCase() === email.trim().toLowerCase())
+        const publicUser: User = {
+          id: String(apiUser?.id ?? seedMatch?.id ?? `u${Date.now()}`),
+          nombre: apiUser?.nombres ?? seedMatch?.nombre ?? email,
+          email: email.trim().toLowerCase(),
+          role: (apiUser?.rol as User['role']) ?? seedMatch?.role ?? 'operario',
+          activo: true,
+          ultimoAcceso: new Date().toISOString().slice(0, 10),
+        }
+        setSession({ user: publicUser, token })
+        return { ok: true }
+      } catch {
+        // Fallback a mock cuando el backend no está disponible
+      }
+
+      // Mock login (offline/desarrollo)
+      await new Promise((r) => setTimeout(r, 200))
       const found = users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase())
       if (!found) return { ok: false, error: 'No existe una cuenta con ese correo.' }
       if (!found.activo) return { ok: false, error: 'La cuenta está desactivada. Contacte al administrador.' }
@@ -78,13 +103,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { password: _pw, ...publicUser } = found
       const withAccess: User = { ...publicUser, ultimoAcceso: new Date().toISOString().slice(0, 10) }
       setUsers((prev) => prev.map((u) => (u.id === found.id ? { ...u, ultimoAcceso: withAccess.ultimoAcceso } : u)))
-      setSession({ user: withAccess, token: fakeJwt(withAccess) })
+      const mockToken = fakeJwt(withAccess)
+      localStorage.setItem('token', mockToken)
+      setSession({ user: withAccess, token: mockToken })
       return { ok: true }
     },
     [users],
   )
 
-  const logout = useCallback(() => setSession(null), [])
+  const logout = useCallback(() => {
+    localStorage.removeItem('token')
+    setSession(null)
+  }, [])
 
   const requestReset = useCallback<AuthContextValue['requestReset']>(
     (email) => {
