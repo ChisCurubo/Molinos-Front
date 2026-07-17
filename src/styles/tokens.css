@@ -1,0 +1,109 @@
+/* ============================================================
+   Molinos de Colombia S.A.S — Design tokens
+   Paleta exacta. JAMÁS azul. Sin degradados morados.
+   ============================================================ */
+:root {
+  /* --- Verdes (marca / acciones primarias) --- */
+  --green-50:#f3f8e6; --green-100:#e5f0c9; --green-200:#cde394; --green-300:#aed15c; --green-400:#9ac230; --green-500:#86af08; --green-600:#719400; --green-700:#5c7a00; --green-800:#465c05; --green-900:#2f3f08;
+  /* --- Café / dorado (acentos, chips de placa) --- */
+  --brown-50:#fdf6ea; --brown-100:#f8e8c8; --brown-200:#efce97; --brown-300:#e3ad5e; --brown-500:#c88e34; --brown-600:#a97225; --brown-700:#855a1d;
+  /* --- Neutros --- */
+  --slate-50:#f7f8f6; --slate-100:#eef0ec; --slate-150:#e6e9e1; --slate-200:#dde1d6; --slate-300:#c2c8b8; --slate-400:#8d9482; --slate-500:#656b5c; --slate-600:#4a4f42; --slate-700:#363a30; --slate-800:#23261f; --slate-900:#14150f;
+  /* --- Estados --- */
+  --emerald-50:#eafbf1; --emerald-200:#9de6bd; --emerald-500:#12a150; --emerald-600:#0d8a44; --emerald-700:#0a6e37; --emerald-800:#08592c;
+  --amber-50:#fffaeb; --amber-100:#fef0c7; --amber-200:#fddd8f; --amber-500:#e39a1c; --amber-600:#c17f11; --amber-700:#93610d;
+  --rose-50:#fdf1f1; --rose-100:#fbdede; --rose-200:#f5bcbc; --rose-500:#d93c3c; --rose-600:#b82c2c; --rose-700:#942222;
+  --info-50:#eef6f6; --info-100:#d3e8e8; --info-500:#1f7a7a; --info-700:#145454;
+
+  /* --- Semánticos --- */
+  --color-primary: var(--green-500);
+  --color-primary-hover: var(--green-600);
+  --color-primary-active: var(--green-700);
+  --color-primary-soft: var(--green-50);
+  --color-primary-border: var(--green-200);
+  --color-accent: var(--brown-500);
+  --color-accent-soft: var(--brown-50);
+  --color-accent-border: var(--brown-200);
+  --surface-page: var(--slate-50);
+  --surface-card: #ffffff;
+  --surface-sunken: var(--slate-100);
+  --border-default: var(--slate-200);
+  --border-subtle: var(--slate-150);
+  --text-heading: var(--slate-900);
+  --text-body: var(--slate-700);
+  --text-muted: var(--slate-500);
+  --text-faint: var(--slate-400);
+  --text-inverse: #ffffff;
+  --status-success-bg: var(--emerald-50); --status-success-text: var(--emerald-700); --status-success-border: var(--emerald-200);
+  --status-warning-bg: var(--amber-50); --status-warning-text: var(--amber-700); --status-warning-border: var(--amber-200);
+  --status-danger-bg: var(--rose-50); --status-danger-text: var(--rose-700); --status-danger-border: var(--rose-200);
+  --status-info-bg: var(--info-50); --status-info-text: var(--info-700); --status-info-border: var(--info-100);
+
+  /* --- Tipografía --- */
+  --font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-heading: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+
+  /* Escala de fuente accesible.
+     El control del dashboard cambia el font-size del <html>; al usar rem en
+     todo el sistema, paddings, alturas y tipografía escalan proporcionalmente.
+     Los KPIs usan clamp() para no desbordarse cuando la letra crece. */
+  --fs-base: 1rem;          /* 16px */
+  --fs-lg: 1.125rem;        /* 18px */
+  --fs-sm: 0.875rem;        /* 14px */
+  --fs-label: 0.875rem;     /* 14px */
+  --fs-kpi: clamp(2rem, 1.4rem + 2vw, 3rem);      /* ~32–48px, se reduce si no cabe */
+  --fs-title: clamp(1.35rem, 1.1rem + 1vw, 1.75rem);
+
+  /* --- Radios / sombras / espaciado --- */
+  --radius-sm: 0.5rem;
+  --radius: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-full: 999px;
+  --shadow-soft: 0 1px 2px rgba(20,21,15,0.04), 0 4px 12px rgba(20,21,15,0.06);
+  --shadow-card: 0 1px 3px rgba(20,21,15,0.06), 0 8px 24px rgba(20,21,15,0.05);
+  --shadow-focus: 0 0 0 3px var(--green-200);
+
+  /* --- Alturas de control (accesibilidad táctil) --- */
+  --control-h: 3.25rem;     /* 52px */
+  --control-h-sm: 2.75rem;  /* 44px */
+  --tap-min: 2.75rem;       /* 44px */
+}
+
+/* ============================================================
+   Modo alto contraste (activado desde el dashboard)
+   ============================================================ */
+:root[data-contrast='high'] {
+  --surface-page: #ffffff;
+  --surface-card: #ffffff;
+  --surface-sunken: #f0f0f0;
+  --border-default: var(--slate-700);
+  --border-subtle: var(--slate-600);
+  --text-heading: #000000;
+  --text-body: #101010;
+  --text-muted: #2a2a2a;
+  --text-faint: #3a3a3a;
+  --color-primary: var(--green-700);
+  --color-primary-hover: var(--green-800);
+  --shadow-focus: 0 0 0 4px var(--green-700);
+}
+
+/* ============================================================
+   Movimiento reducido
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+:root[data-reduce-motion='true'] *,
+:root[data-reduce-motion='true'] *::before,
+:root[data-reduce-motion='true'] *::after {
+  animation-duration: 0.001ms !important;
+  transition-duration: 0.001ms !important;
+}

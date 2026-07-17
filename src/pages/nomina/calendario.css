@@ -1,0 +1,67 @@
+/* ============================================================
+   Calendario de turnos (rem, con scroll horizontal en pantallas pequeñas)
+   ============================================================ */
+.cal-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius);
+  background: var(--surface-card);
+}
+.cal-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  min-width: 44rem;
+}
+.cal-table th,
+.cal-table td {
+  border-bottom: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-subtle);
+  text-align: center;
+  padding: 0.375rem;
+}
+.cal-table thead th {
+  background: var(--surface-sunken);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  position: sticky;
+  top: 0;
+}
+.cal-table th.cal-emp,
+.cal-table td.cal-emp {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  position: sticky;
+  left: 0;
+  background: var(--surface-card);
+  min-width: 10rem;
+  font-weight: 700;
+  color: var(--text-heading);
+  z-index: 1;
+}
+.cal-table thead th.cal-emp { background: var(--surface-sunken); z-index: 2; }
+.cal-dom { color: var(--rose-600); }
+
+.cal-cell {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  color: var(--text-faint);
+}
+.cal-cell:hover { outline: 0.125rem solid var(--color-primary); }
+.cal-cell--d { background: var(--green-100); color: var(--green-800); }
+.cal-cell--n { background: var(--brown-100); color: var(--brown-700); }
+.cal-cell--ausente { background: var(--rose-100); color: var(--rose-700); }
+.cal-cell:disabled { cursor: default; }
+.cal-cell:disabled:hover { outline: none; }
+
+.cal-legend { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; margin: 1rem 0; }
+.cal-legend__item { display: inline-flex; align-items: center; gap: 0.5rem; font-size: var(--fs-sm); color: var(--text-muted); }
+.cal-legend__swatch { width: 1.25rem; height: 1.25rem; border-radius: var(--radius-sm); display: inline-block; }
