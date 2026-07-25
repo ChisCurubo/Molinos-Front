@@ -28,6 +28,7 @@ import { CalendarioTurnosPage } from '@/pages/nomina/CalendarioTurnosPage'
 import { InformesNominaPage } from '@/pages/nomina/InformesNominaPage'
 import { UsuariosPage } from '@/pages/usuarios/UsuariosPage'
 import { InformesPage } from '@/pages/powerbi/InformesPage'
+import { GeneradorPowerBIPage } from '@/pages/powerbi/GeneradorPowerBIPage'
 import { NoAccessPage } from '@/pages/NoAccessPage'
 import { ToastProvider } from '@/components/ui'
 import type { ReactNode } from 'react'
@@ -75,6 +76,7 @@ function AppRoutes() {
         {/* Administración */}
         <Route path="/usuarios" element={<ProtectedRoute module="usuarios"><UsuariosPage /></ProtectedRoute>} />
         <Route path="/informes" element={<ProtectedRoute module="powerbi"><InformesPage /></ProtectedRoute>} />
+        <Route path="/powerbi/generador" element={<ProtectedRoute module="powerbi"><GeneradorPowerBIPage /></ProtectedRoute>} />
         <Route path="/sin-acceso" element={<NoAccessPage />} />
       </Route>
 
