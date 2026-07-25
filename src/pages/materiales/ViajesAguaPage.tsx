@@ -1,12 +1,11 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Droplets, Plus } from 'lucide-react'
-import { Button, Card, Input, KpiTile, Modal, Select, useToast } from '@/components/ui'
+import { Button, Card, Input, KpiTile, Modal, Select } from '@/components/ui'
 import { PageHeader } from '@/components/common/Page'
 import { useCanWrite } from '@/hooks/usePermissions'
 import { formatCOP, formatDate, todayISO } from '@/utils/format'
 import { aguaMock, duenosVolqueta, type AguaRow } from '@/data/mock'
 import { apiPost } from '@/api/withFallback'
-import { apiErrorMessage } from '@/api/client'
 
 const cop = formatCOP
 
@@ -27,7 +26,6 @@ const emptyForm = (): FormState => ({
 
 export function ViajesAguaPage() {
   const canWrite = useCanWrite('materiales')
-  const toast = useToast()
   const [registros, setRegistros] = useState<AguaRow[]>(aguaMock)
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState<FormState>(emptyForm)
@@ -72,12 +70,7 @@ export function ViajesAguaPage() {
       cantidad_viajes: Number(form.cantidad_viajes),
       acpm:            Number(form.acpm) || 0,
     }
-    try {
-      await apiPost('/material/agua', body, (b) => b)
-      toast.success('Viaje de agua registrado')
-    } catch (err) {
-      toast.error(apiErrorMessage(err))
-    }
+    await apiPost('/material/agua', body, (b) => b)
     const nueva: AguaRow = {
       id:              Date.now(),
       id_dueno:        body.id_vehiculo,
