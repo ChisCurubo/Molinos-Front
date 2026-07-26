@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ArrowRight, BarChart3, Boxes, CalendarDays, Coins, DollarSign, FlaskConical,
-  HandCoins, Landmark, Layers, Mountain, Package, PackagePlus, Pencil, Plus,
+  ArrowRight, BarChart3, Boxes, CalendarDays, ClipboardList, Coins, DollarSign, Factory,
+  FlaskConical, HandCoins, Landmark, Layers, Mountain, Package, PackagePlus, Pencil, Plus,
   Scale, Send, Droplets, Trash2, Truck, Users2, Wallet, type LucideIcon,
 } from 'lucide-react'
 import { Button, Card, Input, KpiTile, Modal, Select } from '@/components/ui'
@@ -44,6 +44,9 @@ const AREAS: Area[] = [
     { to:'/nomina',            title:'Empleados y préstamos',  icon:HandCoins,    variant:''        },
     { to:'/nomina/calendario', title:'Calendario de turnos',   icon:CalendarDays, variant:'brown'   },
     { to:'/nomina/informes',   title:'Informes de nómina',     icon:BarChart3,    variant:'info'    },
+  ]},
+  { label:'Planta y producción', icon:Factory, links:[
+    { to:'/planta/calendario', title:'Calendario de planta',   icon:ClipboardList, variant:'brown'  },
   ]},
 ]
 

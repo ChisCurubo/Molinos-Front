@@ -1,7 +1,8 @@
 import { NavLink } from 'react-router-dom'
 import {
-  BarChart3, Boxes, CalendarDays, Coins, Droplets, FlaskConical, HandCoins, Home,
-  Landmark, Layers, Mountain, Package, PackagePlus, Send, Truck, UserCog, Users2, Wallet, type LucideIcon,
+  BarChart3, Boxes, CalendarDays, ClipboardList, Coins, Droplets, Factory, FlaskConical,
+  HandCoins, Home, Landmark, Layers, Mountain, Package, PackagePlus, Send, Truck, UserCog,
+  Users2, Wallet, type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { canView, ROLES, type ModuleKey } from '@/auth/permissions'
@@ -50,9 +51,17 @@ const GROUPS: NavGroup[] = [
     label: 'Nómina',
     icon: Users2,
     items: [
-      { to: '/nomina', label: 'Empleados y préstamos', icon: HandCoins },
-      { to: '/nomina/calendario', label: 'Calendario de turnos', icon: CalendarDays },
-      { to: '/nomina/informes', label: 'Informes de nómina', icon: BarChart3 },
+      { to: '/nomina',            label: 'Empleados y préstamos', icon: HandCoins    },
+      { to: '/nomina/calendario', label: 'Calendario de turnos',  icon: CalendarDays },
+      { to: '/nomina/informes',   label: 'Informes de nómina',    icon: BarChart3    },
+    ],
+  },
+  {
+    module: 'planta',
+    label: 'Planta y producción',
+    icon: Factory,
+    items: [
+      { to: '/planta/calendario', label: 'Calendario de planta', icon: ClipboardList },
     ],
   },
 ]
