@@ -283,7 +283,7 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
     setAbonando(null)
   }
 
-  const colCount = canWrite ? 9 : 8
+  const colCount = canWrite ? 5 : 4
 
   return (
     <>
@@ -315,12 +315,11 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Concepto</th><th>Beneficiario</th><th>Tipo</th>
-                  <th style={{ textAlign: 'right' }}>Monto</th>
-                  <th style={{ textAlign: 'right' }}>Saldo</th>
-                  <th style={{ textAlign: 'right' }}>4×1000</th>
-                  <th>Vence</th><th>Estado</th>
-                  {canWrite && <th></th>}
+                  <th style={{ minWidth: '14rem' }}>Concepto</th>
+                  <th style={{ textAlign: 'right', minWidth: '9rem' }}>Saldo · Monto</th>
+                  <th style={{ minWidth: '8rem' }}>Vence · Estado</th>
+                  <th style={{ textAlign: 'right', minWidth: '6rem' }}>4×1000</th>
+                  {canWrite && <th style={{ textAlign: 'right', minWidth: '10rem' }}></th>}
                 </tr>
               </thead>
               <tbody>
@@ -342,48 +341,67 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
                   return (
                     <React.Fragment key={p.id}>
                       <tr style={{ ...rowBg, ...(pagada ? { opacity: 0.65 } : {}) }}>
-                        <td style={{ fontWeight: 600 }}>
-                          {p.concepto}
-                          {vStatus === 'vencida' && !pagada && <span className="badge badge--danger" style={{ marginLeft: '0.375rem', fontSize: '0.6rem' }}>VENCIDA</span>}
-                          {vStatus === 'proxima' && !pagada && <span className="badge badge--warning" style={{ marginLeft: '0.375rem', fontSize: '0.6rem' }}>POR VENCER</span>}
+                        {/* Col 1: Concepto + tipo + beneficiario */}
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 600 }}>{p.concepto}</span>
+                            <span className="badge badge--neutral" style={{ textTransform: 'capitalize', fontSize: '0.65rem' }}>{p.tipo}</span>
+                            {vStatus === 'vencida' && !pagada && <span className="badge badge--danger" style={{ fontSize: '0.6rem' }}>VENCIDA</span>}
+                            {vStatus === 'proxima' && !pagada && <span className="badge badge--warning" style={{ fontSize: '0.6rem' }}>POR VENCER</span>}
+                          </div>
+                          <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-faint)', marginTop: '0.15rem' }}>{p.beneficiario}</div>
                         </td>
-                        <td style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{p.beneficiario}</td>
-                        <td><span className="badge badge--neutral" style={{ textTransform: 'capitalize' }}>{p.tipo}</span></td>
-                        <td style={{ textAlign: 'right' }} className="mono">{formatCOP(p.monto)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">
-                          <div>{formatCOP(saldo)}</div>
+
+                        {/* Col 2: Saldo + monto original + barra */}
+                        <td style={{ textAlign: 'right' }}>
+                          <div style={{ fontWeight: 800, fontSize: 'var(--fs-base)' }} className="mono">{formatCOP(saldo)}</div>
+                          {saldo !== p.monto && (
+                            <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-faint)' }} className="mono">de {formatCOP(p.monto)}</div>
+                          )}
                           {abonos.length > 0 && (
-                            <div style={{ height: 4, background: 'var(--slate-100)', borderRadius: 999, marginTop: '0.25rem', width: '4rem' }}>
+                            <div style={{ height: 3, background: 'var(--slate-100)', borderRadius: 999, marginTop: '0.3rem', width: '5rem', marginLeft: 'auto' }}>
                               <div style={{ height: '100%', width: `${pct}%`, background: pct === 100 ? 'var(--emerald-500)' : 'var(--amber-500)', borderRadius: 999 }} />
                             </div>
                           )}
                         </td>
-                        <td style={{ textAlign: 'right', color: 'var(--amber-700)', fontSize: 'var(--fs-sm)' }} className="mono">{formatCOP(imp4x1000)}</td>
-                        <td style={{ fontSize: 'var(--fs-sm)', color: vStatus === 'vencida' ? 'var(--rose-600)' : vStatus === 'proxima' ? 'var(--amber-700)' : undefined, fontWeight: vStatus !== 'normal' && vStatus !== 'pagado' ? 700 : undefined }}>
-                          {formatDate(p.fechaVencimiento)}
+
+                        {/* Col 3: Vence + estado */}
+                        <td>
+                          <div style={{ fontSize: 'var(--fs-sm)', fontWeight: vStatus !== 'normal' && vStatus !== 'pagado' ? 700 : undefined, color: vStatus === 'vencida' ? 'var(--rose-600)' : vStatus === 'proxima' ? 'var(--amber-700)' : undefined }}>
+                            {formatDate(p.fechaVencimiento)}
+                          </div>
+                          <div style={{ marginTop: '0.2rem' }}><EstadoBadge estado={p.estado} /></div>
                         </td>
-                        <td><EstadoBadge estado={p.estado} /></td>
+
+                        {/* Col 4: 4×1000 */}
+                        <td style={{ textAlign: 'right', color: 'var(--amber-700)', fontSize: 'var(--fs-sm)' }} className="mono">
+                          {formatCOP(imp4x1000)}
+                          {p.comprobante && (
+                            <div style={{ marginTop: '0.2rem' }}>
+                              <button className="btn btn--ghost btn--sm" style={{ fontSize: 'var(--fs-xs)' }} onClick={() => setViendo(p)}>Ver comp.</button>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Col 5: Acciones (derecha) */}
                         {canWrite && (
-                          <td>
+                          <td style={{ textAlign: 'right' }}>
                             {confirming ? (
-                              <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center', flexWrap: 'nowrap' }}>
+                              <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center', justifyContent: 'flex-end' }}>
                                 <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--rose-600)', whiteSpace: 'nowrap' }}>¿Eliminar?</span>
                                 <Button size="sm" variant="secondary" onClick={() => { remove('porPagar', p.id); setConfirmDeleteId(null) }}>Sí</Button>
                                 <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteId(null)}>No</Button>
                               </div>
                             ) : (
-                              <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
-                                {!pagada && <Button size="sm" onClick={() => abrirAbono(p)}>Abonar</Button>}
-                                <Button size="sm" variant="secondary" onClick={() => openEditar(p)}>✎</Button>
-                                <Button size="sm" variant="secondary" onClick={() => setConfirmDeleteId(p.id)}>×</Button>
-                                {p.comprobante && (
-                                  <Button size="sm" variant="ghost" onClick={() => setViendo(p)}>Ver</Button>
-                                )}
+                              <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                                 {abonos.length > 0 && (
                                   <Button size="sm" variant="ghost" onClick={() => setExpandedId(expanded ? null : p.id)}>
                                     {expanded ? <ChevronUp size={13}/> : <ChevronDown size={13}/>}
                                   </Button>
                                 )}
+                                {!pagada && <Button size="sm" onClick={() => abrirAbono(p)}>Abonar</Button>}
+                                <Button size="sm" variant="secondary" onClick={() => openEditar(p)}>✎</Button>
+                                <Button size="sm" variant="secondary" onClick={() => setConfirmDeleteId(p.id)}>×</Button>
                               </div>
                             )}
                           </td>
@@ -418,11 +436,14 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
               {filtradas.length > 0 && (
                 <tfoot>
                   <tr style={{ fontWeight: 700 }}>
-                    <td colSpan={3}>Total ({filtradas.length})</td>
-                    <td style={{ textAlign: 'right' }} className="mono">{formatCOP(filtradas.reduce((s, p) => s + p.monto, 0))}</td>
-                    <td style={{ textAlign: 'right' }} className="mono">{formatCOP(filtradas.reduce((s, p) => s + (p.saldo ?? p.monto), 0))}</td>
+                    <td>Total ({filtradas.length})</td>
+                    <td style={{ textAlign: 'right' }} className="mono">
+                      <div>{formatCOP(filtradas.reduce((s, p) => s + (p.saldo ?? p.monto), 0))}</div>
+                      <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 400, color: 'var(--text-faint)' }}>de {formatCOP(filtradas.reduce((s, p) => s + p.monto, 0))}</div>
+                    </td>
+                    <td />
                     <td style={{ textAlign: 'right', color: 'var(--amber-700)' }} className="mono">{formatCOP(filtradas.reduce((s, p) => s + (p.saldo ?? p.monto) * 0.004, 0))}</td>
-                    <td colSpan={canWrite ? 3 : 2} />
+                    {canWrite && <td />}
                   </tr>
                 </tfoot>
               )}
