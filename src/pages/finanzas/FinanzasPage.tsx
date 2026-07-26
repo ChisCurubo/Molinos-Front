@@ -327,7 +327,7 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
                   const saldo      = p.saldo ?? p.monto
                   const abonos     = p.abonosHistorial ?? []
                   const pct        = p.monto > 0 ? Math.round(((p.monto - saldo) / p.monto) * 100) : 0
-                  const imp4x1000  = saldo * 0.004
+                  const imp4x1000  = p.monto * 0.004
                   const pagada     = p.estado === 'pagado'
                   const vStatus    = vencimientoStatus(p.fechaVencimiento, p.estado)
                   const expanded   = expandedId === p.id
@@ -442,7 +442,7 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
                       <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 400, color: 'var(--text-faint)' }}>de {formatCOP(filtradas.reduce((s, p) => s + p.monto, 0))}</div>
                     </td>
                     <td />
-                    <td style={{ textAlign: 'right', color: 'var(--amber-700)' }} className="mono">{formatCOP(filtradas.reduce((s, p) => s + (p.saldo ?? p.monto) * 0.004, 0))}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--amber-700)' }} className="mono">{formatCOP(filtradas.reduce((s, p) => s + p.monto * 0.004, 0))}</td>
                     {canWrite && <td />}
                   </tr>
                 </tfoot>
