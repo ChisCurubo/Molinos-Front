@@ -22,7 +22,7 @@ import { ViajesMaterialPage } from '@/pages/materiales/ViajesMaterialPage'
 import { FinanzasPage } from '@/pages/finanzas/FinanzasPage'
 import { PrestamosFinancierosPage } from '@/pages/finanzas/PrestamosFinancierosPage'
 import { InformesFinanzasPage } from '@/pages/finanzas/InformesFinanzasPage'
-import { JulianaPage } from '@/pages/finanzas/JulianaPage'
+import { CuentasPorCobrarPage } from '@/pages/finanzas/CuentasPorCobrarPage'
 import { NominaPage } from '@/pages/nomina/NominaPage'
 import { CalendarioTurnosPage } from '@/pages/nomina/CalendarioTurnosPage'
 import { InformesNominaPage } from '@/pages/nomina/InformesNominaPage'
@@ -64,9 +64,9 @@ function AppRoutes() {
 
         {/* Pagos y finanzas */}
         <Route path="/finanzas" element={<ProtectedRoute module="finanzas"><FinanzasPage /></ProtectedRoute>} />
+        <Route path="/finanzas/cobrar" element={<ProtectedRoute module="finanzas"><CuentasPorCobrarPage /></ProtectedRoute>} />
         <Route path="/finanzas/prestamos" element={<ProtectedRoute module="finanzas"><PrestamosFinancierosPage /></ProtectedRoute>} />
         <Route path="/finanzas/informes" element={<ProtectedRoute module="finanzas"><InformesFinanzasPage /></ProtectedRoute>} />
-        <Route path="/juliana" element={<ProtectedRoute module="finanzas"><JulianaPage /></ProtectedRoute>} />
 
         {/* Nómina */}
         <Route path="/nomina" element={<ProtectedRoute module="nomina"><NominaPage /></ProtectedRoute>} />

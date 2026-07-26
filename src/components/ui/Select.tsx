@@ -47,6 +47,7 @@ export function Select({
           aria-invalid={!!error}
           aria-describedby={error ? errorId : helper ? helperId : undefined}
           aria-required={required}
+          required={required}
           {...rest}
         >
           {placeholder && <option value="">{placeholder}</option>}

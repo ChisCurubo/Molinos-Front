@@ -23,8 +23,9 @@ export function Badge({ tone = 'neutral', icon, children }: BadgeProps) {
 const ESTADO_MAP: Record<EstadoGeneral, { tone: Tone; icon: ReactNode; label: string }> = {
   aprobado: { tone: 'success', icon: <CheckCircle2 size={15} aria-hidden="true" />, label: 'Aprobado' },
   pendiente: { tone: 'warning', icon: <Clock size={15} aria-hidden="true" />, label: 'Pendiente' },
-  rechazado: { tone: 'danger', icon: <XCircle size={15} aria-hidden="true" />, label: 'Rechazado' },
-  revision: { tone: 'info', icon: <Search size={15} aria-hidden="true" />, label: 'En revisión' },
+  rechazado: { tone: 'danger',  icon: <XCircle size={15} aria-hidden="true" />, label: 'Rechazado' },
+  revision:  { tone: 'info',    icon: <Search size={15} aria-hidden="true" />, label: 'En revisión' },
+  pagado:    { tone: 'success', icon: <CheckCircle2 size={15} aria-hidden="true" />, label: 'Pagado' },
 }
 
 export function EstadoBadge({ estado }: { estado: EstadoGeneral }) {

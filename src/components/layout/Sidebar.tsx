@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import {
-  BarChart3, Boxes, CalendarDays, Coins, Droplets, FlaskConical, HandCoins, Home,
+  ArrowDownCircle, BarChart3, Boxes, CalendarDays, Coins, Droplets, FlaskConical, HandCoins, Home,
   Landmark, Layers, Mountain, Package, PackagePlus, Send, Truck, UserCog, Users2, Wallet, type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
@@ -40,9 +40,10 @@ const GROUPS: NavGroup[] = [
     label: 'Pagos y finanzas',
     icon: Coins,
     items: [
-      { to: '/finanzas', label: 'Cuentas por pagar y cobrar', icon: Wallet },
-      { to: '/finanzas/prestamos', label: 'Préstamos financieros', icon: Landmark },
-      { to: '/finanzas/informes', label: 'Informes de finanzas', icon: BarChart3 },
+      { to: '/finanzas',          label: 'Cuentas por pagar',    icon: Wallet           },
+      { to: '/finanzas/cobrar',   label: 'Cuentas por cobrar',   icon: ArrowDownCircle  },
+      { to: '/finanzas/prestamos', label: 'Préstamos financieros', icon: Landmark        },
+      { to: '/finanzas/informes', label: 'Informes de finanzas',  icon: BarChart3        },
     ],
   },
   {
