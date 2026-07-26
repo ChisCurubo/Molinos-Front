@@ -1,6 +1,5 @@
 import React, { useRef, useState, type ChangeEvent } from 'react'
-import { ArrowRight, BarChart3, Building2, CalendarDays, ChevronDown, ChevronUp, Landmark, Upload, Users2, Wallet } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { Building2, ChevronDown, ChevronUp, Landmark, Upload, Users2, Wallet } from 'lucide-react'
 import '../dashboard/dashboard.css'
 import { Button, Card, Input, KpiTile, Modal, Select } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
@@ -23,6 +22,7 @@ interface QuincenaRow {
   nombre: string
   labor: string
   salario: number
+  bonificacion: number
   descuento: number
   neto: number
   estado: 'pendiente' | 'liquidado'
@@ -37,21 +37,34 @@ function QuincenasTab({ canWrite }: { canWrite: boolean }) {
     empMock.map((e) => {
       const activos = prestamosEmpleadoMock.filter((p) => p.empleadoId === e.id && p.estado === 'activo')
       const desc    = activos.reduce((s, p) => s + p.cuota_quincenal, 0)
-      return { empleadoId: e.id, nombre: e.nombre, labor: e.labor, salario: e.salario_quincenal, descuento: desc, neto: e.salario_quincenal - desc, estado: 'pendiente', comprobante: null }
+      return { empleadoId: e.id, nombre: e.nombre, labor: e.labor, salario: e.salario_quincenal, bonificacion: 0, descuento: desc, neto: e.salario_quincenal - desc, estado: 'pendiente', comprobante: null }
     })
   )
+  const [filtroNomina, setFiltroNomina] = useState<'todos' | 'pendiente' | 'liquidado'>('todos')
 
   const [modalQ, setModalQ]           = useState<QuincenaRow | null>(null)
   const [comprobante, setComprobante] = useState<string | null>(null)
   const [errMsg, setErrMsg]           = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const pendientes  = quincenas.filter((q) => q.estado === 'pendiente')
-  const liquidados  = quincenas.filter((q) => q.estado === 'liquidado')
-  const totalNomina = quincenas.reduce((s, q) => s + q.neto, 0)
-  const porPagar    = pendientes.reduce((s, q) => s + q.neto, 0)
+  const pendientes   = quincenas.filter((q) => q.estado === 'pendiente')
+  const liquidados   = quincenas.filter((q) => q.estado === 'liquidado')
+  const porPagar     = pendientes.reduce((s, q) => s + q.neto, 0)
+  const quincenasFiltradas = filtroNomina === 'todos' ? quincenas : quincenas.filter((q) => q.estado === filtroNomina)
+
+  // Modal bonificación
+  const [bonifModal, setBonifModal] = useState<QuincenaRow | null>(null)
+  const [bonifValor, setBonifValor] = useState('')
 
   const openModal = (q: QuincenaRow) => { setModalQ(q); setComprobante(q.comprobante); setErrMsg('') }
+
+  const guardarBonif = () => {
+    const b = Number(bonifValor)
+    setQuincenas((prev) => prev.map((q) => q.empleadoId === bonifModal?.empleadoId
+      ? { ...q, bonificacion: b, neto: q.salario + b - q.descuento }
+      : q))
+    setBonifModal(null)
+  }
 
   const handleFile = (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -64,15 +77,29 @@ function QuincenasTab({ canWrite }: { canWrite: boolean }) {
     setModalQ(null)
   }
 
+
   return (
     <>
-      <Card title={`Quincena ${PERIODO} — ${pendientes.length} pendientes · ${liquidados.length} liquidados · Por pagar: ${formatCOP(porPagar)} · Total: ${formatCOP(totalNomina)}`}>
+      {/* Filtro y resumen */}
+      <div className="toolbar" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <div className="segment">
+          {([['todos', 'Todos'], ['pendiente', 'Pendientes'], ['liquidado', 'Liquidados']] as const).map(([v, l]) => (
+            <button key={v} className={`segment__btn ${filtroNomina === v ? 'segment__btn--active' : ''}`} onClick={() => setFiltroNomina(v)}>{l}</button>
+          ))}
+        </div>
+        <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', alignSelf: 'center' }}>
+          {pendientes.length} pendientes · {liquidados.length} liquidados · Por pagar: <strong>{formatCOP(porPagar)}</strong>
+        </span>
+      </div>
+
+      <Card title={`Quincena ${PERIODO}`}>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
               <tr>
                 <th>#</th><th>Empleado</th><th>Labor</th>
                 <th style={{ textAlign: 'right' }}>Salario</th>
+                <th style={{ textAlign: 'right' }}>Bonificación</th>
                 <th style={{ textAlign: 'right' }}>Desc. préstamo</th>
                 <th style={{ textAlign: 'right' }}>Neto</th>
                 <th>Estado</th><th>Comprobante</th>
@@ -80,12 +107,21 @@ function QuincenasTab({ canWrite }: { canWrite: boolean }) {
               </tr>
             </thead>
             <tbody>
-              {quincenas.map((q, i) => (
+              {quincenasFiltradas.map((q, i) => (
                 <tr key={q.empleadoId} style={q.estado === 'liquidado' ? { opacity: 0.6 } : undefined}>
                   <td className="mono" style={{ color: 'var(--text-faint)' }}>{i + 1}</td>
                   <td style={{ fontWeight: 600 }}>{q.nombre}</td>
                   <td style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{q.labor}</td>
                   <td style={{ textAlign: 'right' }} className="mono">{formatCOP(q.salario)}</td>
+                  <td style={{ textAlign: 'right', color: q.bonificacion > 0 ? 'var(--emerald-700)' : 'var(--text-faint)' }} className="mono">
+                    {q.bonificacion > 0 ? (
+                      <button className="btn btn--ghost btn--sm" onClick={() => { setBonifModal(q); setBonifValor(String(q.bonificacion)) }}>
+                        + {formatCOP(q.bonificacion)}
+                      </button>
+                    ) : canWrite ? (
+                      <button className="btn btn--ghost btn--sm" style={{ color: 'var(--text-faint)' }} onClick={() => { setBonifModal(q); setBonifValor('') }}>+ Agregar</button>
+                    ) : '—'}
+                  </td>
                   <td style={{ textAlign: 'right', color: q.descuento > 0 ? 'var(--rose-600)' : undefined }} className="mono">
                     {q.descuento > 0 ? `- ${formatCOP(q.descuento)}` : '—'}
                   </td>
@@ -110,16 +146,30 @@ function QuincenasTab({ canWrite }: { canWrite: boolean }) {
             </tbody>
             <tfoot>
               <tr style={{ fontWeight: 700 }}>
-                <td colSpan={3}>Total ({quincenas.length})</td>
-                <td style={{ textAlign: 'right' }} className="mono">{formatCOP(quincenas.reduce((s, q) => s + q.salario, 0))}</td>
-                <td style={{ textAlign: 'right' }} className="mono">- {formatCOP(quincenas.reduce((s, q) => s + q.descuento, 0))}</td>
-                <td style={{ textAlign: 'right' }} className="mono">{formatCOP(totalNomina)}</td>
+                <td colSpan={3}>Total ({quincenasFiltradas.length})</td>
+                <td style={{ textAlign: 'right' }} className="mono">{formatCOP(quincenasFiltradas.reduce((s, q) => s + q.salario, 0))}</td>
+                <td style={{ textAlign: 'right', color: 'var(--emerald-700)' }} className="mono">+ {formatCOP(quincenasFiltradas.reduce((s, q) => s + q.bonificacion, 0))}</td>
+                <td style={{ textAlign: 'right' }} className="mono">- {formatCOP(quincenasFiltradas.reduce((s, q) => s + q.descuento, 0))}</td>
+                <td style={{ textAlign: 'right' }} className="mono">{formatCOP(quincenasFiltradas.reduce((s, q) => s + q.neto, 0))}</td>
                 <td colSpan={canWrite ? 3 : 2} />
               </tr>
             </tfoot>
           </table>
         </div>
       </Card>
+
+      {/* Modal bonificación */}
+      <Modal open={!!bonifModal} title={`Bonificación — ${bonifModal?.nombre ?? ''}`} onClose={() => setBonifModal(null)}
+        footer={<><Button variant="secondary" onClick={() => setBonifModal(null)}>Cancelar</Button><Button onClick={guardarBonif}>Guardar</Button></>}>
+        <div className="grid grid--form">
+          <Input label="Monto de bonificación" type="number" placeholder="0" value={bonifValor} onChange={(e) => setBonifValor(e.target.value)} />
+          {bonifValor && Number(bonifValor) > 0 && bonifModal && (
+            <div className="callout" style={{ gridColumn: '1/-1' }}>
+              Neto con bonificación: <strong>{formatCOP(bonifModal.salario + Number(bonifValor) - bonifModal.descuento)}</strong>
+            </div>
+          )}
+        </div>
+      </Modal>
 
       {/* Modal pago */}
       <Modal open={!!modalQ} title={`Liquidar — ${modalQ?.nombre ?? ''}`} onClose={() => setModalQ(null)}
@@ -296,7 +346,6 @@ function PrestamosEmpTab({ canWrite }: { canWrite: boolean }) {
 // ── MAIN ─────────────────────────────────────────────────
 export function NominaPage() {
   const canWrite = useCanWrite('nomina')
-  const navigate = useNavigate()
   const { empleados, plantas, add, update, remove } = useData()
   const [tab, setTab] = useState<Tab>('quincenas')
 
@@ -331,24 +380,6 @@ export function NominaPage() {
     <div className="page">
       <PageHeader title="Nómina y recursos humanos" subtitle="Quincenas, préstamos, empleados y turnos." />
       {!canWrite && <ReadOnlyBanner />}
-
-      {/* Quick-nav sub-páginas del módulo */}
-      <div className="dash-cards" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(13rem, 1fr))', marginBottom: '1.5rem' }}>
-        {[
-          { to: '/nomina/calendario', title: 'Calendario de turnos', icon: CalendarDays, variant: 'brown' },
-          { to: '/nomina/informes',   title: 'Informes de nómina',   icon: BarChart3,    variant: 'info'  },
-        ].map(c => {
-          const Icon = c.icon
-          return (
-            <button key={c.to} className="dash-card" style={{ minHeight: '7rem' }}
-              onClick={() => navigate(c.to)} aria-label={`Ir a ${c.title}`}>
-              <span className={`dash-card__icon dash-card__icon--${c.variant}`}><Icon size={22}/></span>
-              <span className="dash-card__title" style={{ fontSize: 'var(--fs-base)' }}>{c.title}</span>
-              <span className="dash-card__cta">Abrir <ArrowRight size={14}/></span>
-            </button>
-          )
-        })}
-      </div>
 
       <div className="grid grid--kpi" style={{ marginBottom: 20 }}>
         <KpiTile label="Empleados (planta)" value={empMock.length}             icon={<Users2 size={16} />}  accent="green"   />

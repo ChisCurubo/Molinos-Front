@@ -17,8 +17,8 @@ interface ModuloDef {
 
 const MODULOS: ModuloDef[] = [
   { id: 'admin',    label: 'ADMIN',    sub: 'David — Panel completo', icon: Settings2,  color: 'green', email: 'david@molinosdecolombia.com',   to: '/' },
-  { id: 'victoria', label: 'VICTORIA', sub: 'Módulo de agua',         icon: Droplets,   color: 'info',  email: 'vicky@molinosdecolombia.com',   to: '/victoria' },
-  { id: 'juliana',  label: 'JULIANA',  sub: 'Costos y maquila',       icon: Calculator, color: 'amber', email: 'juliana@molinosdecolombia.com', to: '/juliana' },
+  { id: 'victoria', label: 'VICTORIA', sub: 'Módulo de agua',         icon: Droplets,   color: 'info',  email: 'vicky@molinosdecolombia.com',   to: '/' },
+  { id: 'juliana',  label: 'JULIANA',  sub: 'Costos y maquila',       icon: Calculator, color: 'amber', email: 'juliana@molinosdecolombia.com', to: '/' },
 ]
 
 type Mode = 'cards' | 'form'
@@ -70,7 +70,7 @@ export function LoginPage() {
   const isBusy = loading !== null
 
   return (
-    <div className="auth">
+    <main className="auth">
       {/* Lado izquierdo — branding */}
       <div className="auth__brand">
         <img src="/logo-molinos.png" alt="Molinos de Colombia S.A.S" className="auth__logo" />
@@ -190,6 +190,6 @@ export function LoginPage() {
 
         </div>
       </div>
-    </div>
+    </main>
   )
 }

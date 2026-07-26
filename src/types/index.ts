@@ -13,7 +13,7 @@ export interface User {
   ultimoAcceso?: string
 }
 
-export type EstadoGeneral = 'aprobado' | 'pendiente' | 'rechazado' | 'revision'
+export type EstadoGeneral = 'aprobado' | 'pendiente' | 'rechazado' | 'revision' | 'pagado'
 
 // --- Materiales ---
 export interface Volqueta {
@@ -87,6 +87,7 @@ export interface CuentaPorPagar {
   fechaVencimiento: string
   estado: EstadoGeneral
   origen: 'automatico' | 'manual'
+  comprobante?: string | null
 }
 
 export interface CuentaPorCobrar {
@@ -96,17 +97,29 @@ export interface CuentaPorCobrar {
   monto: number
   fechaVencimiento: string
   estado: EstadoGeneral
+  comprobante?: string | null
+}
+
+export interface PagoAbono {
+  id: string
+  fecha: string
+  monto: number
+  comprobante?: string
+  nota?: string
 }
 
 export interface Prestamo {
   id: string
   entidad: string
+  tipo: 'bancario' | 'rotativo'
   capital: number
   interesPct: number // tasa mensual
   plazoMeses: number
   saldo: number
   cuotaMensual: number
   estado: EstadoGeneral
+  pagosAbono?: PagoAbono[]
+  descripcion?: string
 }
 
 // --- Nómina ---
@@ -126,7 +139,7 @@ export interface Empleado {
   activo: boolean
 }
 
-export type TipoTurno = 'diurno' | 'nocturno'
+export type TipoTurno = 'diurno' | 'tarde' | 'nocturno'
 export interface Turno {
   id: string
   empleadoId: string

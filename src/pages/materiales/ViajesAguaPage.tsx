@@ -26,7 +26,14 @@ const emptyForm = (): FormState => ({
 
 export function ViajesAguaPage() {
   const canWrite = useCanWrite('materiales')
-  const [registros, setRegistros] = useState<AguaRow[]>(aguaMock)
+  const [registros, setRegistros] = useState<AguaRow[]>(() => {
+    try {
+      const raw = localStorage.getItem('molinos_erp_agua_v1')
+      return raw ? JSON.parse(raw) : aguaMock
+    } catch {
+      return aguaMock
+    }
+  })
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState<FormState>(emptyForm)
   const [saving, setSaving] = useState(false)
@@ -81,7 +88,15 @@ export function ViajesAguaPage() {
       acpm:            body.acpm,
       valor_total:     body.valor_viaje * body.cantidad_viajes - body.acpm,
     }
-    setRegistros((prev) => [nueva, ...prev])
+    setRegistros((prev) => {
+      const next = [nueva, ...prev]
+      try {
+        localStorage.setItem('molinos_erp_agua_v1', JSON.stringify(next))
+      } catch {
+        /* noop */
+      }
+      return next
+    })
     setSaving(false)
     setModalOpen(false)
     setForm(emptyForm())
@@ -170,13 +185,13 @@ export function ViajesAguaPage() {
         footer={
           <>
             <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSave as unknown as () => void} disabled={saving}>
+            <Button type="submit" form="viajes-agua-form" disabled={saving}>
               {saving ? 'Guardando…' : 'Guardar'}
             </Button>
           </>
         }
       >
-        <form onSubmit={handleSave}>
+        <form id="viajes-agua-form" onSubmit={handleSave}>
           <div className="grid grid--form">
             <Select
               label="Conductor / Dueño volqueta"

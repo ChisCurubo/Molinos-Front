@@ -41,6 +41,7 @@ export function Input({
           aria-invalid={!!error}
           aria-describedby={error ? errorId : helper ? helperId : undefined}
           aria-required={required}
+          required={required}
           {...rest}
         />
       </div>
