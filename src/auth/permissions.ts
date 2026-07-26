@@ -15,6 +15,7 @@ export type ModuleKey =
   | 'nomina'
   | 'usuarios'
   | 'powerbi'
+  | 'planta'
 
 export interface RoleProfile {
   label: string
@@ -32,21 +33,19 @@ const ALL_MODULES: ModuleKey[] = [
   'nomina',
   'usuarios',
   'powerbi',
+  'planta',
 ]
 
 export const ROLES: Record<Role, RoleProfile> = {
   administrador: {
     label: 'Administrador',
-    descripcion: 'Lectura total del sistema. No modifica datos operativos; solo administra usuarios.',
+    descripcion: 'Lectura total del sistema. Gestión de usuarios y calendario de planta.',
     modules: ALL_MODULES,
-    // Solo lectura absoluta sobre datos operativos. Única excepción: la
-    // administración de usuarios (crear/editar accesos), que es una función
-    // inherentemente administrativa y es requisito del sistema.
-    canWrite: (m) => m === 'usuarios',
+    canWrite: (m) => m === 'usuarios' || m === 'planta',
   },
   materiales: {
     label: 'Materiales',
-    descripcion: 'Gestión de entradas de material, laboratorio, viajes y pagos de material.',
+    descripcion: 'Gestión de entradas de material, laboratorio, viajes, producción y pagos de material.',
     modules: ['dashboard', 'materiales', 'powerbi'],
     canWrite: (m) => m === 'materiales',
   },

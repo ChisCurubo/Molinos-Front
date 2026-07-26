@@ -26,6 +26,7 @@ import { CuentasPorCobrarPage } from '@/pages/finanzas/CuentasPorCobrarPage'
 import { NominaPage } from '@/pages/nomina/NominaPage'
 import { CalendarioTurnosPage } from '@/pages/nomina/CalendarioTurnosPage'
 import { InformesNominaPage } from '@/pages/nomina/InformesNominaPage'
+import { CalendarioPlantaPage } from '@/pages/planta/CalendarioPlantaPage'
 import { UsuariosPage } from '@/pages/usuarios/UsuariosPage'
 import { InformesPage } from '@/pages/powerbi/InformesPage'
 import { GeneradorPowerBIPage } from '@/pages/powerbi/GeneradorPowerBIPage'
@@ -72,6 +73,9 @@ function AppRoutes() {
         <Route path="/nomina" element={<ProtectedRoute module="nomina"><NominaPage /></ProtectedRoute>} />
         <Route path="/nomina/calendario" element={<ProtectedRoute module="nomina"><CalendarioTurnosPage /></ProtectedRoute>} />
         <Route path="/nomina/informes" element={<ProtectedRoute module="nomina"><InformesNominaPage /></ProtectedRoute>} />
+
+        {/* Planta y producción */}
+        <Route path="/planta/calendario" element={<ProtectedRoute module="planta"><CalendarioPlantaPage /></ProtectedRoute>} />
 
         {/* Administración */}
         <Route path="/usuarios" element={<ProtectedRoute module="usuarios"><UsuariosPage /></ProtectedRoute>} />
