@@ -38,13 +38,11 @@ export function CuentasPorCobrarPage() {
   const canWrite = useCanWrite('finanzas')
   const { porCobrar, add, update, remove } = useData()
 
-  // Filtros
   const [busqueda,    setBusqueda]    = useState('')
   const [filtroEst,   setFiltroEst]   = useState<string>('todos')
   const [filtroDesde, setFiltroDesde] = useState('')
   const [filtroHasta, setFiltroHasta] = useState('')
 
-  // Modal nueva / editar
   const [modalForm,    setModalForm]    = useState<'nueva' | CuentaPorCobrar | null>(null)
   const [fConcepto,    setFConcepto]    = useState('')
   const [fCliente,     setFCliente]     = useState('')
@@ -53,16 +51,9 @@ export function CuentasPorCobrarPage() {
   const [fVence,       setFVence]       = useState(todayISO())
   const [fEstado,      setFEstado]      = useState('pendiente')
 
-  // Modal cobro completo
-  const [cobrando,    setCobrando]    = useState<CuentaPorCobrar | null>(null)
-  const [comprobante, setComprobante] = useState<string | null>(null)
-  const [errCobro,    setErrCobro]    = useState('')
-  const fileRef = useRef<HTMLInputElement>(null)
-
-  // Modal ver comprobante
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [viendo, setViendo] = useState<CuentaPorCobrar | null>(null)
 
-  // Modal abono parcial
   const [abonando,   setAbonando]   = useState<CuentaPorCobrar | null>(null)
   const [abonoMonto, setAbonoMonto] = useState('')
   const [abonoFecha, setAbonoFecha] = useState(todayISO())
@@ -71,7 +62,6 @@ export function CuentasPorCobrarPage() {
   const [abonoErr,   setAbonoErr]   = useState('')
   const fileAbonoRef = useRef<HTMLInputElement>(null)
 
-  // Expandir historial de abonos
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const clientesExistentes = useMemo(() => {
@@ -126,16 +116,6 @@ export function CuentasPorCobrarPage() {
     setModalForm(null)
   }
 
-  const abrirCobro = (c: CuentaPorCobrar) => { setCobrando(c); setComprobante(null); setErrCobro('') }
-  const handleFileCobro = (e: ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]; if (f) { setComprobante(f.name); setErrCobro('') }
-  }
-  const confirmarCobro = () => {
-    if (!comprobante) { setErrCobro('Adjunta el comprobante antes de marcar como cobrado.'); return }
-    update('porCobrar', cobrando!.id, { estado: 'pagado', saldo: 0, comprobante })
-    setCobrando(null)
-  }
-
   const abrirAbono = (c: CuentaPorCobrar) => {
     setAbonando(c); setAbonoMonto(''); setAbonoFecha(todayISO()); setAbonoNota(''); setAbonoComp(null); setAbonoErr('')
   }
@@ -157,6 +137,8 @@ export function CuentasPorCobrarPage() {
     setAbonando(null)
   }
 
+  const colCount = canWrite ? 8 : 7
+
   return (
     <div className="page">
       <PageHeader title="Cuentas por cobrar" subtitle="Cartera de clientes, vencimientos y comprobantes." />
@@ -168,7 +150,6 @@ export function CuentasPorCobrarPage() {
         <KpiTile label="Cuentas vencidas"    value={vencidasCount}             accent="rose"    icon={<ArrowDownCircle size={16}/>} />
       </div>
 
-      {/* Filtros */}
       <Card flush>
         <div className="toolbar" style={{ flexWrap: 'wrap', gap: '0.75rem', padding: '0.75rem 1rem' }}>
           <div style={{ flex: '1 1 14rem' }}>
@@ -197,28 +178,26 @@ export function CuentasPorCobrarPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Concepto</th>
-                  <th>Cliente</th>
+                  <th>Concepto</th><th>Cliente</th>
                   <th style={{ textAlign: 'right' }}>Monto</th>
                   <th style={{ textAlign: 'right' }}>Saldo</th>
-                  <th>Vence</th>
-                  <th>Estado</th>
-                  <th>Comprobante</th>
+                  <th>Vence</th><th>Estado</th><th>Comprobante</th>
                   {canWrite && <th></th>}
                 </tr>
               </thead>
               <tbody>
                 {filtradas.map((c) => {
-                  const saldo    = c.saldo ?? c.monto
-                  const abonos   = c.abonosHistorial ?? []
-                  const pct      = c.monto > 0 ? Math.round(((c.monto - saldo) / c.monto) * 100) : 0
-                  const vStatus  = vencimientoStatus(c.fechaVencimiento, c.estado)
-                  const cobrada  = c.estado === 'pagado'
-                  const expanded = expandedId === c.id
+                  const saldo      = c.saldo ?? c.monto
+                  const abonos     = c.abonosHistorial ?? []
+                  const pct        = c.monto > 0 ? Math.round(((c.monto - saldo) / c.monto) * 100) : 0
+                  const vStatus    = vencimientoStatus(c.fechaVencimiento, c.estado)
+                  const cobrada    = c.estado === 'pagado'
+                  const expanded   = expandedId === c.id
+                  const confirming = confirmDeleteId === c.id
 
                   const rowBg = cobrada ? undefined
-                    : vStatus === 'vencida'  ? { background: 'var(--rose-50, #fff1f2)' }
-                    : vStatus === 'proxima'  ? { background: 'var(--amber-50, #fffbeb)' }
+                    : vStatus === 'vencida' ? { background: 'var(--rose-50, #fff1f2)' }
+                    : vStatus === 'proxima' ? { background: 'var(--amber-50, #fffbeb)' }
                     : undefined
 
                   return (
@@ -250,23 +229,30 @@ export function CuentasPorCobrarPage() {
                         </td>
                         {canWrite && (
                           <td>
-                            <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
-                              {!cobrada && <Button size="sm" onClick={() => abrirAbono(c)}>Abonar</Button>}
-                              {!cobrada && <Button size="sm" variant="secondary" onClick={() => abrirCobro(c)}>Cobrar</Button>}
-                              <Button size="sm" variant="secondary" onClick={() => openEditar(c)}>✎</Button>
-                              <Button size="sm" variant="ghost" onClick={() => remove('porCobrar', c.id)}>×</Button>
-                              {abonos.length > 0 && (
-                                <Button size="sm" variant="ghost" onClick={() => setExpandedId(expanded ? null : c.id)}>
-                                  {expanded ? <ChevronUp size={13}/> : <ChevronDown size={13}/>}
-                                </Button>
-                              )}
-                            </div>
+                            {confirming ? (
+                              <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center', flexWrap: 'nowrap' }}>
+                                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--rose-600)', whiteSpace: 'nowrap' }}>¿Eliminar?</span>
+                                <Button size="sm" variant="secondary" onClick={() => { remove('porCobrar', c.id); setConfirmDeleteId(null) }}>Sí</Button>
+                                <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteId(null)}>No</Button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                                {!cobrada && <Button size="sm" onClick={() => abrirAbono(c)}>Abonar</Button>}
+                                <Button size="sm" variant="secondary" onClick={() => openEditar(c)}>✎</Button>
+                                <Button size="sm" variant="secondary" onClick={() => setConfirmDeleteId(c.id)}>×</Button>
+                                {abonos.length > 0 && (
+                                  <Button size="sm" variant="ghost" onClick={() => setExpandedId(expanded ? null : c.id)}>
+                                    {expanded ? <ChevronUp size={13}/> : <ChevronDown size={13}/>}
+                                  </Button>
+                                )}
+                              </div>
+                            )}
                           </td>
                         )}
                       </tr>
                       {expanded && abonos.length > 0 && (
                         <tr>
-                          <td colSpan={canWrite ? 8 : 7} style={{ padding: '0.5rem 1rem 1rem', background: 'var(--surface-page)' }}>
+                          <td colSpan={colCount} style={{ padding: '0.5rem 1rem 1rem', background: 'var(--surface-page)' }}>
                             <table className="data-table" style={{ margin: 0 }}>
                               <thead><tr><th>Fecha</th><th style={{ textAlign: 'right' }}>Abono</th><th>Nota</th><th>Comprobante</th></tr></thead>
                               <tbody>
@@ -287,7 +273,7 @@ export function CuentasPorCobrarPage() {
                   )
                 })}
                 {filtradas.length === 0 && (
-                  <tr><td colSpan={canWrite ? 8 : 7} style={{ textAlign: 'center', color: 'var(--text-faint)', padding: '2rem' }}>Sin cuentas para los filtros actuales.</td></tr>
+                  <tr><td colSpan={colCount} style={{ textAlign: 'center', color: 'var(--text-faint)', padding: '2rem' }}>Sin cuentas para los filtros actuales.</td></tr>
                 )}
               </tbody>
               {filtradas.length > 0 && (
@@ -305,7 +291,6 @@ export function CuentasPorCobrarPage() {
         </Card>
       </div>
 
-      {/* Modal nueva / editar */}
       <Modal open={modalForm !== null} title={modalForm === 'nueva' ? 'Nueva cuenta por cobrar' : 'Editar cuenta'}
         onClose={() => setModalForm(null)}
         footer={<><Button variant="secondary" onClick={() => setModalForm(null)}>Cancelar</Button><Button onClick={guardar}>Guardar</Button></>}>
@@ -321,32 +306,6 @@ export function CuentasPorCobrarPage() {
         </div>
       </Modal>
 
-      {/* Modal cobro completo */}
-      <Modal open={!!cobrando} title={`Registrar cobro completo — ${cobrando?.concepto ?? ''}`} onClose={() => setCobrando(null)}
-        footer={<><Button variant="secondary" onClick={() => setCobrando(null)}>Cancelar</Button><Button onClick={confirmarCobro}>Confirmar cobro</Button></>}>
-        {cobrando && (
-          <div className="stack">
-            <div>
-              <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Saldo a cobrar</p>
-              <p style={{ fontSize: 'var(--fs-xl)', fontWeight: 800, color: 'var(--emerald-700)' }}>{formatCOP(cobrando.saldo ?? cobrando.monto)}</p>
-            </div>
-            <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-              <p style={{ fontWeight: 600, marginBottom: '0.5rem' }}>
-                <Upload size={14} style={{ verticalAlign: 'middle', marginRight: '0.375rem' }} />
-                Comprobante de cobro <span style={{ color: 'var(--rose-600)' }}>*</span>
-              </p>
-              <input ref={fileRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={handleFileCobro} />
-              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                <Button variant="secondary" icon={<Upload size={16} />} onClick={() => fileRef.current?.click()}>Adjuntar</Button>
-                {comprobante && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--emerald-700)' }}>✓ {comprobante}</span>}
-              </div>
-              {errCobro && <p style={{ color: 'var(--rose-600)', marginTop: '0.5rem', fontSize: 'var(--fs-sm)' }}>⚠ {errCobro}</p>}
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* Modal abono parcial */}
       <Modal open={!!abonando} title={`Registrar abono — ${abonando?.concepto ?? ''}`} onClose={() => setAbonando(null)}
         footer={<><Button variant="secondary" onClick={() => setAbonando(null)}>Cancelar</Button><Button onClick={confirmarAbono}>Guardar abono</Button></>}>
         {abonando && (
@@ -380,7 +339,6 @@ export function CuentasPorCobrarPage() {
         )}
       </Modal>
 
-      {/* Modal ver comprobante */}
       <Modal open={!!viendo} title={`Comprobante — ${viendo?.concepto ?? ''}`} onClose={() => setViendo(null)}
         footer={<Button variant="secondary" onClick={() => setViendo(null)}>Cerrar</Button>}>
         {viendo && (

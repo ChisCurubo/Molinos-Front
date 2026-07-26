@@ -151,6 +151,7 @@ export interface Empleado {
   cargo: string
   plantaId: string
   salarioBase: number
+  tipoContrato?: 'hora' | 'fijo'
   activo: boolean
 }
 

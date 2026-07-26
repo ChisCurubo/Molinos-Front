@@ -98,17 +98,21 @@ export function CalendarioTurnosPage() {
   // Resumen quincena
   const resumen = useMemo(() => {
     return empleados.map((emp) => {
+      const esFijo = emp.tipoContrato === 'fijo'
       const turnosEmp = dias.flatMap((d) => {
         const t = turnoDe(emp.id, d)
         return t ? [t] : []
       })
       const horasTotales = turnosEmp.filter((t) => t.presente).reduce((s, t) => s + t.horas, 0)
-      const liquidacion  = turnosEmp.filter((t) => t.presente).reduce((s, t) => s + t.horas * VALOR_HORA * (RECARGO[t.tipo] ?? 1), 0)
+      // Salario fijo: mitad del mensual por quincena; por hora: horas × tarifa × recargo
+      const liquidacion = esFijo
+        ? emp.salarioBase / 2
+        : turnosEmp.filter((t) => t.presente).reduce((s, t) => s + t.horas * VALOR_HORA * (RECARGO[t.tipo] ?? 1), 0)
       const contD = turnosEmp.filter((t) => t.presente && t.tipo === 'diurno').length
       const contT = turnosEmp.filter((t) => t.presente && t.tipo === 'tarde').length
       const contN = turnosEmp.filter((t) => t.presente && t.tipo === 'nocturno').length
       const contA = turnosEmp.filter((t) => !t.presente).length
-      return { emp, horasTotales, liquidacion, contD, contT, contN, contA }
+      return { emp, esFijo, horasTotales, liquidacion, contD, contT, contN, contA }
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [turnos, empleados, dias, mes])
@@ -216,15 +220,23 @@ export function CalendarioTurnosPage() {
               </tr>
             </thead>
             <tbody>
-              {resumen.map(({ emp, horasTotales, liquidacion, contD, contT, contN, contA }) => (
+              {resumen.map(({ emp, esFijo, horasTotales, liquidacion, contD, contT, contN, contA }) => (
                 <tr key={emp.id}>
-                  <td style={{ fontWeight: 600 }}>{emp.nombre}</td>
+                  <td style={{ fontWeight: 600 }}>
+                    {emp.nombre}
+                    {esFijo && <span className="badge badge--info" style={{ marginLeft: '0.375rem', fontSize: '0.6rem', verticalAlign: 'middle' }}>FIJO</span>}
+                  </td>
                   <td style={{ textAlign: 'center' }}><span className="cal-legend__swatch cal-cell--d" style={{ display: 'inline-block', width: '1.2rem', height: '1.2rem', lineHeight: '1.2rem', textAlign: 'center', fontSize: '0.7rem', fontWeight: 700, borderRadius: 4 }}>{contD}</span></td>
                   <td style={{ textAlign: 'center' }}><span className="cal-legend__swatch cal-cell--t" style={{ display: 'inline-block', width: '1.2rem', height: '1.2rem', lineHeight: '1.2rem', textAlign: 'center', fontSize: '0.7rem', fontWeight: 700, borderRadius: 4 }}>{contT}</span></td>
                   <td style={{ textAlign: 'center' }}><span className="cal-legend__swatch cal-cell--n" style={{ display: 'inline-block', width: '1.2rem', height: '1.2rem', lineHeight: '1.2rem', textAlign: 'center', fontSize: '0.7rem', fontWeight: 700, borderRadius: 4 }}>{contN}</span></td>
                   <td style={{ textAlign: 'center', color: contA > 0 ? 'var(--rose-600)' : 'var(--text-faint)' }}>{contA}</td>
-                  <td style={{ textAlign: 'right' }} className="mono">{horasTotales}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">{formatCOP(liquidacion)}</td>
+                  <td style={{ textAlign: 'right', color: esFijo ? 'var(--text-muted)' : undefined }} className="mono">
+                    {esFijo ? '—' : horasTotales}
+                  </td>
+                  <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">
+                    {formatCOP(liquidacion)}
+                    {esFijo && <span style={{ display: 'block', fontSize: 'var(--fs-xs)', color: 'var(--text-faint)', fontWeight: 400 }}>salario fijo</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -235,7 +247,7 @@ export function CalendarioTurnosPage() {
                 <td style={{ textAlign: 'center' }}>{resumen.reduce((s, r) => s + r.contT, 0)}</td>
                 <td style={{ textAlign: 'center' }}>{resumen.reduce((s, r) => s + r.contN, 0)}</td>
                 <td style={{ textAlign: 'center' }}>{resumen.reduce((s, r) => s + r.contA, 0)}</td>
-                <td style={{ textAlign: 'right' }} className="mono">{resumen.reduce((s, r) => s + r.horasTotales, 0)}</td>
+                <td style={{ textAlign: 'right' }} className="mono">{resumen.filter(r => !r.esFijo).reduce((s, r) => s + r.horasTotales, 0)}</td>
                 <td style={{ textAlign: 'right' }} className="mono">{formatCOP(resumen.reduce((s, r) => s + r.liquidacion, 0))}</td>
               </tr>
             </tfoot>

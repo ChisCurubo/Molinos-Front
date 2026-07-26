@@ -10,7 +10,7 @@ import { aguaMock, viajesMock, empleados as empMock } from '@/data/mock'
 import { Button, Card, Input, Modal, Select } from '@/components/ui'
 import type { AbonoRegistro, CuentaPorPagar } from '@/types'
 
-type Tab = 'pagar' | 'movimientos'
+type Tab = 'pagar' | 'historico'
 
 const estadoOptions = [
   { value: 'pendiente', label: 'Pendiente' },
@@ -28,7 +28,6 @@ const tipoOptions = [
   { value: 'gasolina',  label: 'Gasolina'       },
 ]
 
-// ── Helpers de vencimiento ───────────────────────────────
 function vencimientoStatus(fecha: string, estado: string) {
   if (estado === 'pagado' || estado === 'rechazado') return 'pagado'
   const hoy  = todayISO()
@@ -38,7 +37,7 @@ function vencimientoStatus(fecha: string, estado: string) {
   return 'normal'
 }
 
-// ── Vista General ────────────────────────────────────────
+// ── Cuentas históricas ───────────────────────────────────
 type CategoriaMov = 'agua' | 'maquila' | 'nomina' | 'mula' | 'gasolina' | 'material' | 'proveedor' | 'alquiler' | 'gasto'
 
 const BADGE_MOV: Record<CategoriaMov, string> = {
@@ -66,7 +65,7 @@ const LABEL_MOV: Record<CategoriaMov, string> = {
 
 interface Movimiento { id: string; fecha: string; categoria: CategoriaMov; descripcion: string; monto: number }
 
-function MovimientosTab() {
+function HistoricoTab() {
   const { porPagar } = useData()
 
   const movimientos = useMemo((): Movimiento[] => {
@@ -105,8 +104,8 @@ function MovimientosTab() {
     ].sort((a, b) => b.fecha.localeCompare(a.fecha))
   }, [porPagar])
 
-  const [filtro,     setFiltro]     = useState<CategoriaMov | 'todos'>('todos')
-  const [busqueda,   setBusqueda]   = useState('')
+  const [filtro,      setFiltro]      = useState<CategoriaMov | 'todos'>('todos')
+  const [busqueda,    setBusqueda]    = useState('')
   const [filtroDesde, setFiltroDesde] = useState('')
   const [filtroHasta, setFiltroHasta] = useState('')
 
@@ -120,21 +119,25 @@ function MovimientosTab() {
 
   const totalFiltrado = filtrados.reduce((s, m) => s + m.monto, 0)
 
+  // KPIs de categoría — responden a los filtros de fecha
   const totalesPorCat = useMemo(() => {
     const t: Partial<Record<CategoriaMov, number>> = {}
-    movimientos.forEach((m) => { t[m.categoria] = (t[m.categoria] ?? 0) + m.monto })
+    filtrados.forEach((m) => { t[m.categoria] = (t[m.categoria] ?? 0) + m.monto })
     return t
-  }, [movimientos])
+  }, [filtrados])
 
   const catsPrincipales: CategoriaMov[] = ['agua', 'maquila', 'nomina', 'mula', 'gasolina']
 
   return (
     <>
+      {/* KPIs de categoría — reemplazan el bloque superior cuando estás en esta pestaña */}
       <div className="grid grid--kpi" style={{ marginBottom: '1.25rem' }}>
         {catsPrincipales.map((c) => (
-          <KpiTile key={c} label={LABEL_MOV[c]} value={formatCOP(totalesPorCat[c] ?? 0)} accent={c === 'maquila' ? 'green' : c === 'nomina' ? 'amber' : 'brown'} icon={<Wallet size={16} />} />
+          <KpiTile key={c} label={LABEL_MOV[c]} value={formatCOP(totalesPorCat[c] ?? 0)}
+            accent={c === 'maquila' ? 'green' : c === 'nomina' ? 'amber' : 'brown'}
+            icon={<Wallet size={16} />} />
         ))}
-        <KpiTile label="Total general" value={formatCOP(movimientos.reduce((s, m) => s + m.monto, 0))} accent="rose" icon={<ArrowUpCircle size={16} />} />
+        <KpiTile label="Total (filtrado)" value={formatCOP(totalFiltrado)} accent="rose" icon={<ArrowUpCircle size={16} />} />
       </div>
 
       {/* Filtros */}
@@ -163,7 +166,7 @@ function MovimientosTab() {
       </Card>
 
       <div style={{ marginTop: '1rem' }}>
-        <Card title={`Movimientos (${filtrados.length})`}>
+        <Card title={`Historial de movimientos (${filtrados.length})`}>
           <div className="table-wrap">
             <table className="data-table">
               <thead>
@@ -213,12 +216,6 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
   const [fVence,    setFVence]    = useState(todayISO())
   const [fEstado,   setFEstado]   = useState('pendiente')
 
-  // Modal pago completo
-  const [pagando,     setPagando]     = useState<CuentaPorPagar | null>(null)
-  const [comprobante, setComprobante] = useState<string | null>(null)
-  const [errPago,     setErrPago]     = useState('')
-  const fileRef = useRef<HTMLInputElement>(null)
-
   // Modal ver comprobante
   const [viendo, setViendo] = useState<CuentaPorPagar | null>(null)
 
@@ -230,6 +227,9 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
   const [abonoComp,   setAbonoComp]   = useState<string | null>(null)
   const [abonoErr,    setAbonoErr]    = useState('')
   const fileAbonoRef = useRef<HTMLInputElement>(null)
+
+  // Confirmación de eliminación inline
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   // Expandir historial
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -262,16 +262,6 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
     setModalForm(null)
   }
 
-  const abrirPago = (p: CuentaPorPagar) => { setPagando(p); setComprobante(null); setErrPago('') }
-  const handleFilePago = (e: ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]; if (f) { setComprobante(f.name); setErrPago('') }
-  }
-  const confirmarPago = () => {
-    if (!comprobante) { setErrPago('Adjunta el comprobante antes de marcar como pagada.'); return }
-    update('porPagar', pagando!.id, { estado: 'pagado', saldo: 0, comprobante })
-    setPagando(null)
-  }
-
   const abrirAbono = (p: CuentaPorPagar) => {
     setAbonando(p); setAbonoMonto(''); setAbonoFecha(todayISO()); setAbonoNota(''); setAbonoComp(null); setAbonoErr('')
   }
@@ -292,6 +282,8 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
     })
     setAbonando(null)
   }
+
+  const colCount = canWrite ? 9 : 8
 
   return (
     <>
@@ -327,7 +319,7 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
                   <th style={{ textAlign: 'right' }}>Monto</th>
                   <th style={{ textAlign: 'right' }}>Saldo</th>
                   <th style={{ textAlign: 'right' }}>4×1000</th>
-                  <th>Vence</th><th>Estado</th><th>Comprobante</th>
+                  <th>Vence</th><th>Estado</th>
                   {canWrite && <th></th>}
                 </tr>
               </thead>
@@ -340,6 +332,7 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
                   const pagada     = p.estado === 'pagado'
                   const vStatus    = vencimientoStatus(p.fechaVencimiento, p.estado)
                   const expanded   = expandedId === p.id
+                  const confirming = confirmDeleteId === p.id
 
                   const rowBg = pagada ? undefined
                     : vStatus === 'vencida'  ? { background: 'var(--rose-50, #fff1f2)' }
@@ -370,30 +363,35 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
                           {formatDate(p.fechaVencimiento)}
                         </td>
                         <td><EstadoBadge estado={p.estado} /></td>
-                        <td style={{ fontSize: 'var(--fs-sm)' }}>
-                          {p.comprobante
-                            ? <button className="btn btn--ghost btn--sm" onClick={() => setViendo(p)}>Ver</button>
-                            : <em style={{ color: 'var(--text-faint)' }}>—</em>}
-                        </td>
                         {canWrite && (
                           <td>
-                            <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
-                              {!pagada && <Button size="sm" onClick={() => abrirAbono(p)}>Abonar</Button>}
-                              {!pagada && <Button size="sm" variant="secondary" onClick={() => abrirPago(p)}>Pagar</Button>}
-                              <Button size="sm" variant="secondary" onClick={() => openEditar(p)}>✎</Button>
-                              <Button size="sm" variant="ghost" onClick={() => remove('porPagar', p.id)}>×</Button>
-                              {abonos.length > 0 && (
-                                <Button size="sm" variant="ghost" onClick={() => setExpandedId(expanded ? null : p.id)}>
-                                  {expanded ? <ChevronUp size={13}/> : <ChevronDown size={13}/>}
-                                </Button>
-                              )}
-                            </div>
+                            {confirming ? (
+                              <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center', flexWrap: 'nowrap' }}>
+                                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--rose-600)', whiteSpace: 'nowrap' }}>¿Eliminar?</span>
+                                <Button size="sm" variant="secondary" onClick={() => { remove('porPagar', p.id); setConfirmDeleteId(null) }}>Sí</Button>
+                                <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteId(null)}>No</Button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                                {!pagada && <Button size="sm" onClick={() => abrirAbono(p)}>Abonar</Button>}
+                                <Button size="sm" variant="secondary" onClick={() => openEditar(p)}>✎</Button>
+                                <Button size="sm" variant="secondary" onClick={() => setConfirmDeleteId(p.id)}>×</Button>
+                                {p.comprobante && (
+                                  <Button size="sm" variant="ghost" onClick={() => setViendo(p)}>Ver</Button>
+                                )}
+                                {abonos.length > 0 && (
+                                  <Button size="sm" variant="ghost" onClick={() => setExpandedId(expanded ? null : p.id)}>
+                                    {expanded ? <ChevronUp size={13}/> : <ChevronDown size={13}/>}
+                                  </Button>
+                                )}
+                              </div>
+                            )}
                           </td>
                         )}
                       </tr>
                       {expanded && abonos.length > 0 && (
                         <tr>
-                          <td colSpan={canWrite ? 10 : 9} style={{ padding: '0.5rem 1rem 1rem', background: 'var(--surface-page)' }}>
+                          <td colSpan={colCount} style={{ padding: '0.5rem 1rem 1rem', background: 'var(--surface-page)' }}>
                             <table className="data-table" style={{ margin: 0 }}>
                               <thead><tr><th>Fecha</th><th style={{ textAlign: 'right' }}>Abono</th><th>Nota</th><th>Comprobante</th></tr></thead>
                               <tbody>
@@ -414,7 +412,7 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
                   )
                 })}
                 {filtradas.length === 0 && (
-                  <tr><td colSpan={canWrite ? 10 : 9} style={{ textAlign: 'center', color: 'var(--text-faint)', padding: '2rem' }}>Sin registros para los filtros seleccionados.</td></tr>
+                  <tr><td colSpan={colCount} style={{ textAlign: 'center', color: 'var(--text-faint)', padding: '2rem' }}>Sin registros para los filtros seleccionados.</td></tr>
                 )}
               </tbody>
               {filtradas.length > 0 && (
@@ -424,7 +422,7 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
                     <td style={{ textAlign: 'right' }} className="mono">{formatCOP(filtradas.reduce((s, p) => s + p.monto, 0))}</td>
                     <td style={{ textAlign: 'right' }} className="mono">{formatCOP(filtradas.reduce((s, p) => s + (p.saldo ?? p.monto), 0))}</td>
                     <td style={{ textAlign: 'right', color: 'var(--amber-700)' }} className="mono">{formatCOP(filtradas.reduce((s, p) => s + (p.saldo ?? p.monto) * 0.004, 0))}</td>
-                    <td colSpan={canWrite ? 4 : 3} />
+                    <td colSpan={canWrite ? 3 : 2} />
                   </tr>
                 </tfoot>
               )}
@@ -450,37 +448,6 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
           <Input label="Fecha vencimiento" type="date" value={fVence} onChange={(e) => setFVence(e.target.value)} />
           <Select label="Estado" options={estadoOptions} value={fEstado} onChange={(e) => setFEstado(e.target.value)} />
         </div>
-      </Modal>
-
-      <Modal open={!!pagando} title={`Pago completo — ${pagando?.concepto ?? ''}`} onClose={() => setPagando(null)}
-        footer={<><Button variant="secondary" onClick={() => setPagando(null)}>Cancelar</Button><Button onClick={confirmarPago}>Confirmar pago</Button></>}>
-        {pagando && (
-          <div className="stack">
-            <div className="grid grid--form">
-              <div>
-                <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Saldo a pagar</p>
-                <p style={{ fontSize: 'var(--fs-lg)', fontWeight: 700 }}>{formatCOP(pagando.saldo ?? pagando.monto)}</p>
-              </div>
-              <div>
-                <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>4×1000 (impuesto)</p>
-                <p style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--amber-700)' }}>{formatCOP((pagando.saldo ?? pagando.monto) * 0.004)}</p>
-              </div>
-              <div>
-                <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Total real con impuesto</p>
-                <p style={{ fontSize: 'var(--fs-xl)', fontWeight: 800, color: 'var(--rose-600)' }}>{formatCOP((pagando.saldo ?? pagando.monto) * 1.004)}</p>
-              </div>
-            </div>
-            <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-              <p style={{ fontWeight: 600, marginBottom: '0.5rem' }}><Upload size={14} style={{ verticalAlign: 'middle', marginRight: '0.375rem' }} />Comprobante <span style={{ color: 'var(--rose-600)' }}>*</span></p>
-              <input ref={fileRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={handleFilePago} />
-              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                <Button variant="secondary" icon={<Upload size={16} />} onClick={() => fileRef.current?.click()}>Adjuntar</Button>
-                {comprobante && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--emerald-700)' }}>✓ {comprobante}</span>}
-              </div>
-              {errPago && <p style={{ color: 'var(--rose-600)', marginTop: '0.5rem', fontSize: 'var(--fs-sm)' }}>⚠ {errPago}</p>}
-            </div>
-          </div>
-        )}
       </Modal>
 
       <Modal open={!!abonando} title={`Registrar abono — ${abonando?.concepto ?? ''}`} onClose={() => setAbonando(null)}
@@ -548,15 +515,18 @@ export function FinanzasPage() {
       <PageHeader title="Pagos y finanzas" subtitle="Cuentas por pagar, movimientos operativos y vencimientos." />
       {!canWrite && <ReadOnlyBanner />}
 
-      <div className="grid grid--kpi" style={{ marginBottom: 20 }}>
-        <KpiTile label="Por pagar (saldo)"  value={formatCOP(totalPagar)}    icon={<ArrowUpCircle size={16} />}   accent="rose"    />
-        <KpiTile label="Por cobrar (saldo)" value={formatCOP(totalCobrar)}   icon={<ArrowDownCircle size={16} />} accent="emerald" />
-        <KpiTile label="Saldo préstamos"    value={formatCOP(saldoPrestamos)} icon={<Landmark size={16} />}       accent="brown"   />
-        <KpiTile label="Vencidas sin pagar" value={vencidasPagar}             icon={<Wallet size={16} />}         accent="amber"   />
-      </div>
+      {/* KPI principal — solo visible en pestaña "Cuentas por pagar" */}
+      {tab === 'pagar' && (
+        <div className="grid grid--kpi" style={{ marginBottom: 20 }}>
+          <KpiTile label="Por pagar (saldo)"  value={formatCOP(totalPagar)}    icon={<ArrowUpCircle size={16} />}   accent="rose"    />
+          <KpiTile label="Por cobrar (saldo)" value={formatCOP(totalCobrar)}   icon={<ArrowDownCircle size={16} />} accent="emerald" />
+          <KpiTile label="Saldo préstamos"    value={formatCOP(saldoPrestamos)} icon={<Landmark size={16} />}       accent="brown"   />
+          <KpiTile label="Vencidas sin pagar" value={vencidasPagar}             icon={<Wallet size={16} />}         accent="amber"   />
+        </div>
+      )}
 
       <div className="segment" role="tablist" style={{ marginBottom: 18 }}>
-        {([{ key: 'pagar', label: 'Cuentas por pagar' }, { key: 'movimientos', label: 'Vista general' }] as { key: Tab; label: string }[]).map((t) => (
+        {([{ key: 'pagar', label: 'Cuentas por pagar' }, { key: 'historico', label: 'Cuentas históricas' }] as { key: Tab; label: string }[]).map((t) => (
           <button key={t.key} role="tab" aria-selected={tab === t.key}
             className={`segment__btn ${tab === t.key ? 'segment__btn--active' : ''}`}
             onClick={() => setTab(t.key)}>
@@ -565,8 +535,8 @@ export function FinanzasPage() {
         ))}
       </div>
 
-      {tab === 'pagar'       && <PagarTab canWrite={canWrite} />}
-      {tab === 'movimientos' && <MovimientosTab />}
+      {tab === 'pagar'    && <PagarTab canWrite={canWrite} />}
+      {tab === 'historico' && <HistoricoTab />}
     </div>
   )
 }
