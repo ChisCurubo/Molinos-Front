@@ -77,13 +77,24 @@ export interface ViajeAgua {
 }
 
 // --- Finanzas ---
-export type TipoMovimiento = 'flete' | 'material' | 'proveedor' | 'gasto' | 'alquiler'
+export type TipoMovimiento = 'flete' | 'material' | 'proveedor' | 'gasto' | 'alquiler' | 'gasolina'
+
+export interface AbonoRegistro {
+  id: string
+  fecha: string
+  monto: number
+  comprobante?: string
+  nota?: string
+}
+
 export interface CuentaPorPagar {
   id: string
   concepto: string
   tipo: TipoMovimiento
   beneficiario: string
   monto: number
+  saldo?: number
+  abonosHistorial?: AbonoRegistro[]
   fechaVencimiento: string
   estado: EstadoGeneral
   origen: 'automatico' | 'manual'
@@ -95,6 +106,8 @@ export interface CuentaPorCobrar {
   concepto: string
   cliente: string
   monto: number
+  saldo?: number
+  abonosHistorial?: AbonoRegistro[]
   fechaVencimiento: string
   estado: EstadoGeneral
   comprobante?: string | null
@@ -113,13 +126,15 @@ export interface Prestamo {
   entidad: string
   tipo: 'bancario' | 'rotativo'
   capital: number
-  interesPct: number // tasa mensual
+  interesPct: number
   plazoMeses: number
   saldo: number
   cuotaMensual: number
   estado: EstadoGeneral
   pagosAbono?: PagoAbono[]
   descripcion?: string
+  valorMaterial?: number
+  porcentajeAdelanto?: number
 }
 
 // --- Nómina ---

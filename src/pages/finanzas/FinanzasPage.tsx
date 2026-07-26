@@ -1,17 +1,16 @@
-import { useRef, useMemo, useState, type ChangeEvent } from 'react'
-import { ArrowDownCircle, ArrowUpCircle, Landmark, LayoutList, Upload, Wallet } from 'lucide-react'
+import React, { useRef, useMemo, useState, type ChangeEvent } from 'react'
+import { ArrowDownCircle, ArrowUpCircle, ChevronDown, ChevronUp, Landmark, Upload, Wallet } from 'lucide-react'
 import '../dashboard/dashboard.css'
 import { EstadoBadge, KpiTile } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
 import { useData } from '@/context/DataContext'
 import { useCanWrite } from '@/hooks/usePermissions'
-import { formatCOP, formatDate, calc4x1000inv } from '@/utils/format'
-import { aguaMock, viajesMock, empleados as empMock, calc4x1000, calc4x1000Inverso } from '@/data/mock'
+import { formatCOP, formatDate, todayISO } from '@/utils/format'
+import { aguaMock, viajesMock, empleados as empMock } from '@/data/mock'
 import { Button, Card, Input, Modal, Select } from '@/components/ui'
-import type { CuentaPorPagar } from '@/types'
-import { todayISO } from '@/utils/format'
+import type { AbonoRegistro, CuentaPorPagar } from '@/types'
 
-type Tab = 'pagar' | 'movimientos' | 'calculadora'
+type Tab = 'pagar' | 'movimientos'
 
 const estadoOptions = [
   { value: 'pendiente', label: 'Pendiente' },
@@ -24,22 +23,53 @@ const tipoOptions = [
   { value: 'gasto',     label: 'Gasto general' },
   { value: 'proveedor', label: 'Proveedor'      },
   { value: 'alquiler',  label: 'Alquiler'       },
-  { value: 'flete',     label: 'Flete'          },
+  { value: 'flete',     label: 'Flete / Mula'   },
   { value: 'material',  label: 'Material'       },
+  { value: 'gasolina',  label: 'Gasolina'       },
 ]
 
-// ── Tabla referencia 4×1000 ──────────────────────────────
-const TABLA_REF = [500_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000, 20_000_000, 50_000_000].map((m) => calc4x1000(m))
+// ── Helpers de vencimiento ───────────────────────────────
+function vencimientoStatus(fecha: string, estado: string) {
+  if (estado === 'pagado' || estado === 'rechazado') return 'pagado'
+  const hoy  = todayISO()
+  const diff = Math.ceil((new Date(fecha).getTime() - new Date(hoy).getTime()) / 86_400_000)
+  if (diff < 0)  return 'vencida'
+  if (diff <= 3) return 'proxima'
+  return 'normal'
+}
 
-// ── Tipos movimiento ─────────────────────────────────────
-type CategoriaMov = 'agua' | 'maquila' | 'nomina'
+// ── Vista General ────────────────────────────────────────
+type CategoriaMov = 'agua' | 'maquila' | 'nomina' | 'mula' | 'gasolina' | 'material' | 'proveedor' | 'alquiler' | 'gasto'
+
+const BADGE_MOV: Record<CategoriaMov, string> = {
+  agua:      'badge--info',
+  maquila:   'badge--success',
+  nomina:    'badge--warning',
+  mula:      'badge--neutral',
+  gasolina:  'badge--neutral',
+  material:  'badge--info',
+  proveedor: 'badge--neutral',
+  alquiler:  'badge--warning',
+  gasto:     'badge--neutral',
+}
+const LABEL_MOV: Record<CategoriaMov, string> = {
+  agua:      'Agua',
+  maquila:   'Maquila',
+  nomina:    'Nómina',
+  mula:      'Mula / Flete',
+  gasolina:  'Gasolina',
+  material:  'Material',
+  proveedor: 'Proveedor',
+  alquiler:  'Alquiler',
+  gasto:     'Gasto general',
+}
+
 interface Movimiento { id: string; fecha: string; categoria: CategoriaMov; descripcion: string; monto: number }
 
-const BADGE_MOV: Record<CategoriaMov, string> = { agua: 'badge--info', maquila: 'badge--success', nomina: 'badge--warning' }
-const LABEL_MOV: Record<CategoriaMov, string> = { agua: 'Agua', maquila: 'Maquila', nomina: 'Nómina' }
+function MovimientosTab() {
+  const { porPagar } = useData()
 
-function useMovimientos(): Movimiento[] {
-  return useMemo(() => {
+  const movimientos = useMemo((): Movimiento[] => {
     const agua: Movimiento[] = aguaMock.map((a) => ({
       id: `agua-${a.id}`, fecha: a.fecha, categoria: 'agua',
       descripcion: `Agua — ${a.conductor} (${a.cantidad_viajes} viajes)`,
@@ -55,180 +85,161 @@ function useMovimientos(): Movimiento[] {
       descripcion: `Nómina — ${e.nombre} (${e.labor})`,
       monto: e.salario_quincenal,
     }))
-    return [...agua, ...maquila, ...nomina].sort((a, b) => b.fecha.localeCompare(a.fecha))
-  }, [])
-}
+    const dePorPagar = (tipo: CuentaPorPagar['tipo'], cat: CategoriaMov): Movimiento[] =>
+      porPagar
+        .filter((p) => p.tipo === tipo && p.estado !== 'rechazado')
+        .map((p) => ({
+          id: `pp-${p.id}`, fecha: p.fechaVencimiento, categoria: cat,
+          descripcion: `${p.concepto} — ${p.beneficiario}`,
+          monto: p.saldo ?? p.monto,
+        }))
 
-// ── Sub-tab: Vista general ───────────────────────────────
-function MovimientosTab() {
-  const movimientos = useMovimientos()
-  const [filtro, setFiltro] = useState<CategoriaMov | 'todos'>('todos')
+    return [
+      ...agua, ...maquila, ...nomina,
+      ...dePorPagar('flete',     'mula'),
+      ...dePorPagar('gasolina',  'gasolina'),
+      ...dePorPagar('material',  'material'),
+      ...dePorPagar('proveedor', 'proveedor'),
+      ...dePorPagar('alquiler',  'alquiler'),
+      ...dePorPagar('gasto',     'gasto'),
+    ].sort((a, b) => b.fecha.localeCompare(a.fecha))
+  }, [porPagar])
 
-  const filtrados    = filtro === 'todos' ? movimientos : movimientos.filter((m) => m.categoria === filtro)
+  const [filtro,     setFiltro]     = useState<CategoriaMov | 'todos'>('todos')
+  const [busqueda,   setBusqueda]   = useState('')
+  const [filtroDesde, setFiltroDesde] = useState('')
+  const [filtroHasta, setFiltroHasta] = useState('')
+
+  const filtrados = useMemo(() => movimientos.filter((m) => {
+    if (filtro !== 'todos' && m.categoria !== filtro) return false
+    if (busqueda && !m.descripcion.toLowerCase().includes(busqueda.toLowerCase())) return false
+    if (filtroDesde && m.fecha < filtroDesde) return false
+    if (filtroHasta && m.fecha > filtroHasta) return false
+    return true
+  }), [movimientos, filtro, busqueda, filtroDesde, filtroHasta])
+
   const totalFiltrado = filtrados.reduce((s, m) => s + m.monto, 0)
-  const totalAgua    = movimientos.filter((m) => m.categoria === 'agua').reduce((s, m) => s + m.monto, 0)
-  const totalMaquila = movimientos.filter((m) => m.categoria === 'maquila').reduce((s, m) => s + m.monto, 0)
-  const totalNomina  = movimientos.filter((m) => m.categoria === 'nomina').reduce((s, m) => s + m.monto, 0)
+
+  const totalesPorCat = useMemo(() => {
+    const t: Partial<Record<CategoriaMov, number>> = {}
+    movimientos.forEach((m) => { t[m.categoria] = (t[m.categoria] ?? 0) + m.monto })
+    return t
+  }, [movimientos])
+
+  const catsPrincipales: CategoriaMov[] = ['agua', 'maquila', 'nomina', 'mula', 'gasolina']
 
   return (
     <>
       <div className="grid grid--kpi" style={{ marginBottom: '1.25rem' }}>
-        <KpiTile label="Total agua"    value={formatCOP(totalAgua)}    accent="emerald" icon={<LayoutList size={16} />} />
-        <KpiTile label="Total maquila" value={formatCOP(totalMaquila)} accent="green"   icon={<LayoutList size={16} />} />
-        <KpiTile label="Total nómina"  value={formatCOP(totalNomina)}  accent="amber"   icon={<LayoutList size={16} />} />
-        <KpiTile label="Total general" value={formatCOP(totalAgua + totalMaquila + totalNomina)} accent="brown" icon={<Wallet size={16} />} />
+        {catsPrincipales.map((c) => (
+          <KpiTile key={c} label={LABEL_MOV[c]} value={formatCOP(totalesPorCat[c] ?? 0)} accent={c === 'maquila' ? 'green' : c === 'nomina' ? 'amber' : 'brown'} icon={<Wallet size={16} />} />
+        ))}
+        <KpiTile label="Total general" value={formatCOP(movimientos.reduce((s, m) => s + m.monto, 0))} accent="rose" icon={<ArrowUpCircle size={16} />} />
       </div>
 
-      <Card title={`Movimientos (${filtrados.length})`}>
-        <div className="segment" style={{ marginBottom: '1rem' }}>
-          {(['todos', 'agua', 'maquila', 'nomina'] as const).map((c) => (
-            <button key={c} className={`segment__btn ${filtro === c ? 'segment__btn--active' : ''}`} onClick={() => setFiltro(c)}>
-              {c === 'todos' ? 'Todos' : LABEL_MOV[c]}
-            </button>
-          ))}
-        </div>
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr><th>Fecha</th><th>Categoría</th><th>Descripción</th><th style={{ textAlign: 'right' }}>Monto</th></tr>
-            </thead>
-            <tbody>
-              {filtrados.map((m) => (
-                <tr key={m.id}>
-                  <td>{formatDate(m.fecha)}</td>
-                  <td><span className={`badge ${BADGE_MOV[m.categoria]}`}>{LABEL_MOV[m.categoria]}</span></td>
-                  <td style={{ fontSize: 'var(--fs-sm)' }}>{m.descripcion}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">{formatCOP(m.monto)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr style={{ fontWeight: 700 }}>
-                <td colSpan={3}>Total ({filtrados.length})</td>
-                <td style={{ textAlign: 'right' }} className="mono">{formatCOP(totalFiltrado)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </Card>
-    </>
-  )
-}
-
-// ── Sub-tab: Calculadora 4×1000 ──────────────────────────
-function CalculadoraTab() {
-  const [modo, setModo]   = useState<'normal' | 'inverso'>('normal')
-  const [monto, setMonto] = useState('')
-
-  const resultado = useMemo(() => {
-    const n = Number(monto)
-    if (!n || n <= 0) return null
-    return modo === 'normal' ? calc4x1000(n) : calc4x1000Inverso(n)
-  }, [monto, modo])
-
-  return (
-    <>
-      <Card title="Calculadora 4×1000 (GMF — Gravamen a los Movimientos Financieros)">
-        <div className="segment" style={{ marginBottom: '1.25rem' }}>
-          <button className={`segment__btn ${modo === 'normal'  ? 'segment__btn--active' : ''}`} onClick={() => { setModo('normal');  setMonto('') }}>
-            Normal (monto → neto)
-          </button>
-          <button className={`segment__btn ${modo === 'inverso' ? 'segment__btn--active' : ''}`} onClick={() => { setModo('inverso'); setMonto('') }}>
-            Inverso (neto → bruto)
-          </button>
-        </div>
-
-        <div className="grid grid--form" style={{ maxWidth: '24rem' }}>
-          <Input
-            label={modo === 'normal' ? 'Monto bruto a retirar / pagar' : 'Monto neto que quieres recibir'}
-            type="number" placeholder="1000000"
-            value={monto} onChange={(e) => setMonto(e.target.value)}
-          />
-        </div>
-
-        {resultado && (
-          <div className="grid grid--kpi" style={{ marginTop: '1rem' }}>
-            {'monto' in resultado ? (
-              <>
-                <KpiTile label="Monto bruto"     value={formatCOP(resultado.monto)}    accent="brown"   />
-                <KpiTile label="Impuesto 4×1000" value={formatCOP(resultado.impuesto)} accent="rose"    />
-                <KpiTile label="Neto recibido"   value={formatCOP(resultado.neto)}     accent="emerald" />
-              </>
-            ) : (
-              <>
-                <KpiTile label="Neto deseado"    value={formatCOP(resultado.neto)}     accent="emerald" />
-                <KpiTile label="Impuesto 4×1000" value={formatCOP(resultado.impuesto)} accent="rose"    />
-                <KpiTile label="Bruto a retirar" value={formatCOP(resultado.bruto)}    accent="brown"   />
-              </>
-            )}
+      {/* Filtros */}
+      <Card flush>
+        <div className="toolbar" style={{ flexWrap: 'wrap', gap: '0.75rem', padding: '0.75rem 1rem' }}>
+          <div style={{ flex: '1 1 14rem' }}>
+            <Input label="Buscar concepto" placeholder="Descripción…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
           </div>
-        )}
+          <div style={{ flex: '1 1 9rem' }}>
+            <Input label="Desde" type="date" value={filtroDesde} onChange={(e) => setFiltroDesde(e.target.value)} />
+          </div>
+          <div style={{ flex: '1 1 9rem' }}>
+            <Input label="Hasta" type="date" value={filtroHasta} onChange={(e) => setFiltroHasta(e.target.value)} />
+          </div>
+        </div>
+        <div style={{ padding: '0 1rem 0.75rem', overflowX: 'auto' }}>
+          <div className="segment" style={{ flexWrap: 'wrap' }}>
+            <button className={`segment__btn ${filtro === 'todos' ? 'segment__btn--active' : ''}`} onClick={() => setFiltro('todos')}>Todos</button>
+            {(Object.keys(LABEL_MOV) as CategoriaMov[]).map((c) => (
+              <button key={c} className={`segment__btn ${filtro === c ? 'segment__btn--active' : ''}`} onClick={() => setFiltro(c)}>
+                {LABEL_MOV[c]}
+              </button>
+            ))}
+          </div>
+        </div>
       </Card>
 
-      <Card title="Tabla de referencia">
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'right' }}>Monto bruto</th>
-                <th style={{ textAlign: 'right' }}>Impuesto</th>
-                <th style={{ textAlign: 'right' }}>Neto</th>
-                <th style={{ textAlign: 'right' }}>Bruto necesario (inverso)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {TABLA_REF.map((r) => {
-                const inv = calc4x1000inv(r.neto)
-                return (
-                  <tr key={r.monto}>
-                    <td style={{ textAlign: 'right' }} className="mono">{formatCOP(r.monto)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--rose-600)' }} className="mono">{formatCOP(r.impuesto)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--emerald-700)', fontWeight: 700 }} className="mono">{formatCOP(r.neto)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--amber-700)' }} className="mono">{formatCOP(inv.bruto)}</td>
+      <div style={{ marginTop: '1rem' }}>
+        <Card title={`Movimientos (${filtrados.length})`}>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th style={{ textAlign: 'right' }}>Monto</th></tr>
+              </thead>
+              <tbody>
+                {filtrados.map((m) => (
+                  <tr key={m.id}>
+                    <td style={{ fontSize: 'var(--fs-sm)' }}>{formatDate(m.fecha)}</td>
+                    <td><span className={`badge ${BADGE_MOV[m.categoria]}`}>{LABEL_MOV[m.categoria]}</span></td>
+                    <td style={{ fontSize: 'var(--fs-sm)' }}>{m.descripcion}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">{formatCOP(m.monto)}</td>
                   </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-        <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-faint)', marginTop: '0.5rem' }}>
-          Tarifa: 4 pesos por cada $1.000 (0.4%). Normal: neto = monto × 0.996. Inverso: bruto = neto / 0.996.
-        </p>
-      </Card>
+                ))}
+                {filtrados.length === 0 && (
+                  <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-faint)', padding: '2rem' }}>Sin movimientos para los filtros actuales.</td></tr>
+                )}
+              </tbody>
+              <tfoot>
+                <tr style={{ fontWeight: 700 }}>
+                  <td colSpan={3}>Total ({filtrados.length})</td>
+                  <td style={{ textAlign: 'right' }} className="mono">{formatCOP(totalFiltrado)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </Card>
+      </div>
     </>
   )
 }
 
-// ── Sub-tab: Cuentas por pagar ───────────────────────────
+// ── Cuentas por pagar ────────────────────────────────────
 function PagarTab({ canWrite }: { canWrite: boolean }) {
   const { porPagar, add, update, remove } = useData()
 
   const [filtroTipo,   setFiltroTipo]   = useState<string>('todos')
   const [filtroEstado, setFiltroEstado] = useState<string>('todos')
+  const [busqueda,     setBusqueda]     = useState('')
 
   // Modal nueva / editar
-  const [modalForm, setModalForm]   = useState<'nueva' | CuentaPorPagar | null>(null)
-  const [fConcepto, setFConcepto]   = useState('')
-  const [fBenef,    setFBenef]      = useState('')
-  const [fTipo,     setFTipo]       = useState('gasto')
-  const [fMonto,    setFMonto]      = useState('')
-  const [fVence,    setFVence]      = useState(todayISO())
-  const [fEstado,   setFEstado]     = useState('pendiente')
+  const [modalForm, setModalForm] = useState<'nueva' | CuentaPorPagar | null>(null)
+  const [fConcepto, setFConcepto] = useState('')
+  const [fBenef,    setFBenef]    = useState('')
+  const [fTipo,     setFTipo]     = useState('gasto')
+  const [fMonto,    setFMonto]    = useState('')
+  const [fVence,    setFVence]    = useState(todayISO())
+  const [fEstado,   setFEstado]   = useState('pendiente')
 
-  // Modal pago
-  const [pagando,      setPagando]      = useState<CuentaPorPagar | null>(null)
-  const [comprobante,  setComprobante]  = useState<string | null>(null)
-  const [errPago,      setErrPago]      = useState('')
+  // Modal pago completo
+  const [pagando,     setPagando]     = useState<CuentaPorPagar | null>(null)
+  const [comprobante, setComprobante] = useState<string | null>(null)
+  const [errPago,     setErrPago]     = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   // Modal ver comprobante
   const [viendo, setViendo] = useState<CuentaPorPagar | null>(null)
 
-  const filtradas = porPagar.filter((p) => {
+  // Modal abono parcial
+  const [abonando,    setAbonando]    = useState<CuentaPorPagar | null>(null)
+  const [abonoMonto,  setAbonoMonto]  = useState('')
+  const [abonoFecha,  setAbonoFecha]  = useState(todayISO())
+  const [abonoNota,   setAbonoNota]   = useState('')
+  const [abonoComp,   setAbonoComp]   = useState<string | null>(null)
+  const [abonoErr,    setAbonoErr]    = useState('')
+  const fileAbonoRef = useRef<HTMLInputElement>(null)
+
+  // Expandir historial
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+
+  const filtradas = useMemo(() => porPagar.filter((p) => {
     if (filtroTipo !== 'todos' && p.tipo !== filtroTipo) return false
     if (filtroEstado !== 'todos' && p.estado !== filtroEstado) return false
+    if (busqueda && !p.concepto.toLowerCase().includes(busqueda.toLowerCase()) && !p.beneficiario.toLowerCase().includes(busqueda.toLowerCase())) return false
     return true
-  })
+  }), [porPagar, filtroTipo, filtroEstado, busqueda])
 
   const openNueva = () => {
     setFConcepto(''); setFBenef(''); setFTipo('gasto'); setFMonto(''); setFVence(todayISO()); setFEstado('pendiente')
@@ -243,7 +254,8 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
     if (!fConcepto || !fBenef || !fMonto) return
     const vals = { concepto: fConcepto, beneficiario: fBenef, tipo: fTipo as CuentaPorPagar['tipo'], monto: Number(fMonto), fechaVencimiento: fVence, estado: fEstado as CuentaPorPagar['estado'] }
     if (modalForm === 'nueva') {
-      add('porPagar', { id: `p${Date.now()}`, origen: 'manual', comprobante: null, ...vals } as CuentaPorPagar)
+      const monto = Number(fMonto)
+      add('porPagar', { id: `p${Date.now()}`, origen: 'manual', comprobante: null, saldo: monto, abonosHistorial: [], ...vals } as CuentaPorPagar)
     } else if (modalForm) {
       update('porPagar', (modalForm as CuentaPorPagar).id, vals)
     }
@@ -251,128 +263,180 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
   }
 
   const abrirPago = (p: CuentaPorPagar) => { setPagando(p); setComprobante(null); setErrPago('') }
-  const handleFile = (e: ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]
-    if (f) { setComprobante(f.name); setErrPago('') }
+  const handleFilePago = (e: ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; if (f) { setComprobante(f.name); setErrPago('') }
   }
   const confirmarPago = () => {
     if (!comprobante) { setErrPago('Adjunta el comprobante antes de marcar como pagada.'); return }
-    update('porPagar', pagando!.id, { estado: 'pagado', comprobante })
+    update('porPagar', pagando!.id, { estado: 'pagado', saldo: 0, comprobante })
     setPagando(null)
   }
 
-  const totalFiltrado  = filtradas.reduce((s, p) => s + p.monto, 0)
-  const totalImpuesto  = filtradas.reduce((s, p) => s + p.monto * 0.004, 0)
-  const pendientesCount = porPagar.filter((p) => p.estado === 'pendiente' || p.estado === 'aprobado').length
+  const abrirAbono = (p: CuentaPorPagar) => {
+    setAbonando(p); setAbonoMonto(''); setAbonoFecha(todayISO()); setAbonoNota(''); setAbonoComp(null); setAbonoErr('')
+  }
+  const handleFileAbono = (e: ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; if (f) { setAbonoComp(f.name); setAbonoErr('') }
+  }
+  const confirmarAbono = () => {
+    const monto = Number(abonoMonto)
+    const saldoActual = abonando!.saldo ?? abonando!.monto
+    if (!monto || monto <= 0) { setAbonoErr('Ingresa un monto válido.'); return }
+    if (monto > saldoActual) { setAbonoErr(`El abono no puede superar el saldo (${formatCOP(saldoActual)}).`); return }
+    const nuevoSaldo = saldoActual - monto
+    const reg: AbonoRegistro = { id: `ab${Date.now()}`, fecha: abonoFecha, monto, nota: abonoNota || undefined, comprobante: abonoComp ?? undefined }
+    update('porPagar', abonando!.id, {
+      saldo: nuevoSaldo,
+      abonosHistorial: [...(abonando!.abonosHistorial ?? []), reg],
+      estado: nuevoSaldo === 0 ? 'pagado' : abonando!.estado,
+    })
+    setAbonando(null)
+  }
 
   return (
     <>
       {/* Filtros */}
-      <div className="toolbar" style={{ marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-muted)' }}>Tipo:</span>
-          <div className="segment">
-            {[{ v: 'todos', l: 'Todos' }, ...tipoOptions.map(o => ({ v: o.value, l: o.label }))].map(o => (
-              <button key={o.v} className={`segment__btn ${filtroTipo === o.v ? 'segment__btn--active' : ''}`} onClick={() => setFiltroTipo(o.v)}>{o.l}</button>
-            ))}
+      <Card flush>
+        <div className="toolbar" style={{ flexWrap: 'wrap', gap: '0.75rem', padding: '0.75rem 1rem' }}>
+          <div style={{ flex: '1 1 14rem' }}>
+            <Input label="Buscar" placeholder="Concepto o beneficiario…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
           </div>
-        </div>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-muted)' }}>Estado:</span>
-          <div className="segment">
-            {[{ v: 'todos', l: 'Todos' }, { v: 'pendiente', l: 'Pendientes' }, { v: 'pagado', l: 'Pagadas' }].map(o => (
-              <button key={o.v} className={`segment__btn ${filtroEstado === o.v ? 'segment__btn--active' : ''}`} onClick={() => setFiltroEstado(o.v)}>{o.l}</button>
-            ))}
+          <div style={{ alignSelf: 'flex-end', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <div className="segment">
+              {[{ v: 'todos', l: 'Todos' }, ...tipoOptions.map(o => ({ v: o.value, l: o.label }))].map(o => (
+                <button key={o.v} className={`segment__btn ${filtroTipo === o.v ? 'segment__btn--active' : ''}`} onClick={() => setFiltroTipo(o.v)}>{o.l}</button>
+              ))}
+            </div>
+            <div className="segment">
+              {[{ v: 'todos', l: 'Todos' }, { v: 'pendiente', l: 'Pendientes' }, { v: 'pagado', l: 'Pagadas' }].map(o => (
+                <button key={o.v} className={`segment__btn ${filtroEstado === o.v ? 'segment__btn--active' : ''}`} onClick={() => setFiltroEstado(o.v)}>{o.l}</button>
+              ))}
+            </div>
           </div>
-        </div>
-        {canWrite && (
-          <Button size="sm" onClick={openNueva} style={{ marginLeft: 'auto' }}>+ Nueva cuenta</Button>
-        )}
-      </div>
-
-      {/* Resumen 4×1000 */}
-      {filtradas.length > 0 && (
-        <div className="grid grid--kpi" style={{ marginBottom: '1rem' }}>
-          <KpiTile label={`Total a pagar (${filtradas.length})`} value={formatCOP(totalFiltrado)} accent="rose" icon={<ArrowUpCircle size={16}/>} />
-          <KpiTile label="4×1000 estimado" value={formatCOP(totalImpuesto)} accent="amber" icon={<Wallet size={16}/>} />
-          <KpiTile label="Neto real (con impuesto)" value={formatCOP(totalFiltrado + totalImpuesto)} accent="brown" icon={<Wallet size={16}/>} />
-          <KpiTile label="Pendientes de pago" value={pendientesCount} accent="rose" icon={<ArrowUpCircle size={16}/>} />
-        </div>
-      )}
-
-      <Card title={`Cuentas por pagar (${filtradas.length})`}>
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Concepto</th>
-                <th>Beneficiario</th>
-                <th>Tipo</th>
-                <th style={{ textAlign: 'right' }}>Monto</th>
-                <th style={{ textAlign: 'right' }}>4×1000</th>
-                <th>Vence</th>
-                <th>Estado</th>
-                <th>Comprobante</th>
-                {canWrite && <th></th>}
-              </tr>
-            </thead>
-            <tbody>
-              {filtradas.map((p) => {
-                const imp4x1000 = p.monto * 0.004
-                const pagada = p.estado === 'pagado'
-                return (
-                  <tr key={p.id} style={pagada ? { opacity: 0.65 } : undefined}>
-                    <td style={{ fontWeight: 600 }}>{p.concepto}</td>
-                    <td style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{p.beneficiario}</td>
-                    <td><span className="badge badge--neutral" style={{ textTransform: 'capitalize' }}>{p.tipo}</span></td>
-                    <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">{formatCOP(p.monto)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--amber-700)', fontSize: 'var(--fs-sm)' }} className="mono">
-                      {formatCOP(imp4x1000)}
-                    </td>
-                    <td style={{ fontSize: 'var(--fs-sm)' }}>{formatDate(p.fechaVencimiento)}</td>
-                    <td><EstadoBadge estado={p.estado} /></td>
-                    <td style={{ fontSize: 'var(--fs-sm)' }}>
-                      {p.comprobante
-                        ? <button className="btn btn--ghost btn--sm" onClick={() => setViendo(p)}>Ver</button>
-                        : <em style={{ color: 'var(--text-faint)' }}>—</em>}
-                    </td>
-                    {canWrite && (
-                      <td>
-                        <div style={{ display: 'flex', gap: '0.25rem' }}>
-                          {!pagada && <Button size="sm" onClick={() => abrirPago(p)}>Pagar</Button>}
-                          <Button size="sm" variant="secondary" onClick={() => openEditar(p)}>Editar</Button>
-                          <Button size="sm" variant="ghost" onClick={() => remove('porPagar', p.id)}>×</Button>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                )
-              })}
-              {filtradas.length === 0 && (
-                <tr><td colSpan={canWrite ? 9 : 8} style={{ textAlign: 'center', color: 'var(--text-faint)', padding: '2rem' }}>Sin registros para los filtros seleccionados.</td></tr>
-              )}
-            </tbody>
-            {filtradas.length > 0 && (
-              <tfoot>
-                <tr style={{ fontWeight: 700 }}>
-                  <td colSpan={3}>Total ({filtradas.length})</td>
-                  <td style={{ textAlign: 'right' }} className="mono">{formatCOP(totalFiltrado)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--amber-700)' }} className="mono">{formatCOP(totalImpuesto)}</td>
-                  <td colSpan={canWrite ? 4 : 3} />
-                </tr>
-              </tfoot>
-            )}
-          </table>
+          {canWrite && <Button size="sm" onClick={openNueva}>+ Nueva cuenta</Button>}
         </div>
       </Card>
 
-      {/* Modal nueva / editar */}
-      <Modal
-        open={modalForm !== null}
-        title={modalForm === 'nueva' ? 'Nueva cuenta por pagar' : 'Editar cuenta'}
+      <div style={{ marginTop: '1rem' }}>
+        <Card title={`Cuentas por pagar (${filtradas.length})`}>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Concepto</th><th>Beneficiario</th><th>Tipo</th>
+                  <th style={{ textAlign: 'right' }}>Monto</th>
+                  <th style={{ textAlign: 'right' }}>Saldo</th>
+                  <th style={{ textAlign: 'right' }}>4×1000</th>
+                  <th>Vence</th><th>Estado</th><th>Comprobante</th>
+                  {canWrite && <th></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {filtradas.map((p) => {
+                  const saldo      = p.saldo ?? p.monto
+                  const abonos     = p.abonosHistorial ?? []
+                  const pct        = p.monto > 0 ? Math.round(((p.monto - saldo) / p.monto) * 100) : 0
+                  const imp4x1000  = saldo * 0.004
+                  const pagada     = p.estado === 'pagado'
+                  const vStatus    = vencimientoStatus(p.fechaVencimiento, p.estado)
+                  const expanded   = expandedId === p.id
+
+                  const rowBg = pagada ? undefined
+                    : vStatus === 'vencida'  ? { background: 'var(--rose-50, #fff1f2)' }
+                    : vStatus === 'proxima'  ? { background: 'var(--amber-50, #fffbeb)' }
+                    : undefined
+
+                  return (
+                    <React.Fragment key={p.id}>
+                      <tr style={{ ...rowBg, ...(pagada ? { opacity: 0.65 } : {}) }}>
+                        <td style={{ fontWeight: 600 }}>
+                          {p.concepto}
+                          {vStatus === 'vencida' && !pagada && <span className="badge badge--danger" style={{ marginLeft: '0.375rem', fontSize: '0.6rem' }}>VENCIDA</span>}
+                          {vStatus === 'proxima' && !pagada && <span className="badge badge--warning" style={{ marginLeft: '0.375rem', fontSize: '0.6rem' }}>POR VENCER</span>}
+                        </td>
+                        <td style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{p.beneficiario}</td>
+                        <td><span className="badge badge--neutral" style={{ textTransform: 'capitalize' }}>{p.tipo}</span></td>
+                        <td style={{ textAlign: 'right' }} className="mono">{formatCOP(p.monto)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">
+                          <div>{formatCOP(saldo)}</div>
+                          {abonos.length > 0 && (
+                            <div style={{ height: 4, background: 'var(--slate-100)', borderRadius: 999, marginTop: '0.25rem', width: '4rem' }}>
+                              <div style={{ height: '100%', width: `${pct}%`, background: pct === 100 ? 'var(--emerald-500)' : 'var(--amber-500)', borderRadius: 999 }} />
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right', color: 'var(--amber-700)', fontSize: 'var(--fs-sm)' }} className="mono">{formatCOP(imp4x1000)}</td>
+                        <td style={{ fontSize: 'var(--fs-sm)', color: vStatus === 'vencida' ? 'var(--rose-600)' : vStatus === 'proxima' ? 'var(--amber-700)' : undefined, fontWeight: vStatus !== 'normal' && vStatus !== 'pagado' ? 700 : undefined }}>
+                          {formatDate(p.fechaVencimiento)}
+                        </td>
+                        <td><EstadoBadge estado={p.estado} /></td>
+                        <td style={{ fontSize: 'var(--fs-sm)' }}>
+                          {p.comprobante
+                            ? <button className="btn btn--ghost btn--sm" onClick={() => setViendo(p)}>Ver</button>
+                            : <em style={{ color: 'var(--text-faint)' }}>—</em>}
+                        </td>
+                        {canWrite && (
+                          <td>
+                            <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                              {!pagada && <Button size="sm" onClick={() => abrirAbono(p)}>Abonar</Button>}
+                              {!pagada && <Button size="sm" variant="secondary" onClick={() => abrirPago(p)}>Pagar</Button>}
+                              <Button size="sm" variant="secondary" onClick={() => openEditar(p)}>✎</Button>
+                              <Button size="sm" variant="ghost" onClick={() => remove('porPagar', p.id)}>×</Button>
+                              {abonos.length > 0 && (
+                                <Button size="sm" variant="ghost" onClick={() => setExpandedId(expanded ? null : p.id)}>
+                                  {expanded ? <ChevronUp size={13}/> : <ChevronDown size={13}/>}
+                                </Button>
+                              )}
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                      {expanded && abonos.length > 0 && (
+                        <tr>
+                          <td colSpan={canWrite ? 10 : 9} style={{ padding: '0.5rem 1rem 1rem', background: 'var(--surface-page)' }}>
+                            <table className="data-table" style={{ margin: 0 }}>
+                              <thead><tr><th>Fecha</th><th style={{ textAlign: 'right' }}>Abono</th><th>Nota</th><th>Comprobante</th></tr></thead>
+                              <tbody>
+                                {abonos.map((ab) => (
+                                  <tr key={ab.id}>
+                                    <td style={{ fontSize: 'var(--fs-sm)' }}>{formatDate(ab.fecha)}</td>
+                                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--emerald-700)' }} className="mono">{formatCOP(ab.monto)}</td>
+                                    <td style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{ab.nota ?? '—'}</td>
+                                    <td style={{ fontSize: 'var(--fs-sm)' }}>{ab.comprobante ? <span style={{ color: 'var(--emerald-700)' }}>✓ {ab.comprobante}</span> : <em style={{ color: 'var(--text-faint)' }}>—</em>}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  )
+                })}
+                {filtradas.length === 0 && (
+                  <tr><td colSpan={canWrite ? 10 : 9} style={{ textAlign: 'center', color: 'var(--text-faint)', padding: '2rem' }}>Sin registros para los filtros seleccionados.</td></tr>
+                )}
+              </tbody>
+              {filtradas.length > 0 && (
+                <tfoot>
+                  <tr style={{ fontWeight: 700 }}>
+                    <td colSpan={3}>Total ({filtradas.length})</td>
+                    <td style={{ textAlign: 'right' }} className="mono">{formatCOP(filtradas.reduce((s, p) => s + p.monto, 0))}</td>
+                    <td style={{ textAlign: 'right' }} className="mono">{formatCOP(filtradas.reduce((s, p) => s + (p.saldo ?? p.monto), 0))}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--amber-700)' }} className="mono">{formatCOP(filtradas.reduce((s, p) => s + (p.saldo ?? p.monto) * 0.004, 0))}</td>
+                    <td colSpan={canWrite ? 4 : 3} />
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </Card>
+      </div>
+
+      {/* ── Modales ────────────────────────────────────────── */}
+      <Modal open={modalForm !== null} title={modalForm === 'nueva' ? 'Nueva cuenta por pagar' : 'Editar cuenta'}
         onClose={() => setModalForm(null)}
-        footer={<><Button variant="secondary" onClick={() => setModalForm(null)}>Cancelar</Button><Button onClick={guardar}>Guardar</Button></>}
-      >
+        footer={<><Button variant="secondary" onClick={() => setModalForm(null)}>Cancelar</Button><Button onClick={guardar}>Guardar</Button></>}>
         <div className="grid grid--form">
           <Input label="Concepto" value={fConcepto} onChange={(e) => setFConcepto(e.target.value)} required />
           <Input label="Beneficiario" value={fBenef} onChange={(e) => setFBenef(e.target.value)} required />
@@ -380,7 +444,7 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
           <Input label="Monto" type="number" value={fMonto} onChange={(e) => setFMonto(e.target.value)} required />
           {fMonto && Number(fMonto) > 0 && (
             <div className="callout" style={{ gridColumn: '1/-1' }}>
-              4×1000: <strong>{formatCOP(Number(fMonto) * 0.004)}</strong> — Neto con impuesto: <strong>{formatCOP(Number(fMonto) * 1.004)}</strong>
+              4×1000: <strong>{formatCOP(Number(fMonto) * 0.004)}</strong> — Total real (con impuesto): <strong>{formatCOP(Number(fMonto) * 1.004)}</strong>
             </div>
           )}
           <Input label="Fecha vencimiento" type="date" value={fVence} onChange={(e) => setFVence(e.target.value)} />
@@ -388,36 +452,28 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
         </div>
       </Modal>
 
-      {/* Modal pagar */}
-      <Modal
-        open={!!pagando}
-        title={`Registrar pago — ${pagando?.concepto ?? ''}`}
-        onClose={() => setPagando(null)}
-        footer={<><Button variant="secondary" onClick={() => setPagando(null)}>Cancelar</Button><Button onClick={confirmarPago}>Confirmar pago</Button></>}
-      >
+      <Modal open={!!pagando} title={`Pago completo — ${pagando?.concepto ?? ''}`} onClose={() => setPagando(null)}
+        footer={<><Button variant="secondary" onClick={() => setPagando(null)}>Cancelar</Button><Button onClick={confirmarPago}>Confirmar pago</Button></>}>
         {pagando && (
           <div className="stack">
             <div className="grid grid--form">
               <div>
-                <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Monto a pagar</p>
-                <p style={{ fontSize: 'var(--fs-lg)', fontWeight: 700 }}>{formatCOP(pagando.monto)}</p>
+                <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Saldo a pagar</p>
+                <p style={{ fontSize: 'var(--fs-lg)', fontWeight: 700 }}>{formatCOP(pagando.saldo ?? pagando.monto)}</p>
               </div>
               <div>
                 <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>4×1000 (impuesto)</p>
-                <p style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--amber-700)' }}>{formatCOP(pagando.monto * 0.004)}</p>
+                <p style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--amber-700)' }}>{formatCOP((pagando.saldo ?? pagando.monto) * 0.004)}</p>
               </div>
               <div>
-                <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Total real (monto + 4×1000)</p>
-                <p style={{ fontSize: 'var(--fs-xl)', fontWeight: 800, color: 'var(--rose-600)' }}>{formatCOP(pagando.monto * 1.004)}</p>
+                <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Total real con impuesto</p>
+                <p style={{ fontSize: 'var(--fs-xl)', fontWeight: 800, color: 'var(--rose-600)' }}>{formatCOP((pagando.saldo ?? pagando.monto) * 1.004)}</p>
               </div>
             </div>
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-              <p style={{ fontWeight: 600, marginBottom: '0.5rem' }}>
-                <Upload size={14} style={{ verticalAlign: 'middle', marginRight: '0.375rem' }} />
-                Comprobante de pago <span style={{ color: 'var(--rose-600)' }}>*</span>
-              </p>
-              <input ref={fileRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={handleFile} />
-              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <p style={{ fontWeight: 600, marginBottom: '0.5rem' }}><Upload size={14} style={{ verticalAlign: 'middle', marginRight: '0.375rem' }} />Comprobante <span style={{ color: 'var(--rose-600)' }}>*</span></p>
+              <input ref={fileRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={handleFilePago} />
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
                 <Button variant="secondary" icon={<Upload size={16} />} onClick={() => fileRef.current?.click()}>Adjuntar</Button>
                 {comprobante && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--emerald-700)' }}>✓ {comprobante}</span>}
               </div>
@@ -427,19 +483,47 @@ function PagarTab({ canWrite }: { canWrite: boolean }) {
         )}
       </Modal>
 
-      {/* Modal ver comprobante */}
-      <Modal
-        open={!!viendo}
-        title={`Comprobante — ${viendo?.concepto ?? ''}`}
-        onClose={() => setViendo(null)}
-        footer={<Button variant="secondary" onClick={() => setViendo(null)}>Cerrar</Button>}
-      >
+      <Modal open={!!abonando} title={`Registrar abono — ${abonando?.concepto ?? ''}`} onClose={() => setAbonando(null)}
+        footer={<><Button variant="secondary" onClick={() => setAbonando(null)}>Cancelar</Button><Button onClick={confirmarAbono}>Guardar abono</Button></>}>
+        {abonando && (
+          <div className="stack">
+            <div className="grid grid--form">
+              <div>
+                <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Saldo actual</p>
+                <p style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--rose-600)' }}>{formatCOP(abonando.saldo ?? abonando.monto)}</p>
+              </div>
+            </div>
+            <div className="grid grid--form">
+              <Input label="Fecha del abono" type="date" value={abonoFecha} onChange={(e) => setAbonoFecha(e.target.value)} />
+              <Input label="Monto a abonar" type="number" value={abonoMonto} onChange={(e) => setAbonoMonto(e.target.value)} required />
+              {abonoMonto && Number(abonoMonto) > 0 && (
+                <div className="callout" style={{ gridColumn: '1/-1' }}>
+                  Saldo después del abono: <strong>{formatCOP(Math.max(0, (abonando.saldo ?? abonando.monto) - Number(abonoMonto)))}</strong>
+                </div>
+              )}
+              <Input label="Nota (opcional)" value={abonoNota} onChange={(e) => setAbonoNota(e.target.value)} style={{ gridColumn: '1/-1' }} />
+            </div>
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+              <p style={{ fontWeight: 600, marginBottom: '0.5rem' }}>Comprobante (opcional)</p>
+              <input ref={fileAbonoRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={handleFileAbono} />
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                <Button variant="secondary" icon={<Upload size={16} />} onClick={() => fileAbonoRef.current?.click()}>Adjuntar</Button>
+                {abonoComp && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--emerald-700)' }}>✓ {abonoComp}</span>}
+              </div>
+            </div>
+            {abonoErr && <p style={{ color: 'var(--rose-600)', fontSize: 'var(--fs-sm)' }}>⚠ {abonoErr}</p>}
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={!!viendo} title={`Comprobante — ${viendo?.concepto ?? ''}`} onClose={() => setViendo(null)}
+        footer={<Button variant="secondary" onClick={() => setViendo(null)}>Cerrar</Button>}>
         {viendo && (
           <div style={{ textAlign: 'center', padding: '1rem' }}>
             <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Archivo adjunto:</p>
             <p style={{ fontWeight: 600, color: 'var(--emerald-700)' }}>✓ {viendo.comprobante}</p>
             <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-faint)', marginTop: '0.5rem' }}>
-              Pagado el {formatDate(viendo.fechaVencimiento)} · Monto {formatCOP(viendo.monto)}
+              {viendo.beneficiario} · {formatCOP(viendo.monto)}
             </p>
           </div>
         )}
@@ -454,30 +538,25 @@ export function FinanzasPage() {
   const { porPagar, porCobrar, prestamos } = useData()
   const [tab, setTab] = useState<Tab>('pagar')
 
-  const totalPagar     = porPagar.filter((p) => p.estado !== 'rechazado' && p.estado !== 'pagado').reduce((s, p) => s + p.monto, 0)
-  const totalCobrar    = porCobrar.filter((c) => c.estado !== 'rechazado').reduce((s, c) => s + c.monto, 0)
+  const totalPagar     = porPagar.filter((p) => p.estado !== 'rechazado' && p.estado !== 'pagado').reduce((s, p) => s + (p.saldo ?? p.monto), 0)
+  const totalCobrar    = porCobrar.filter((c) => c.estado !== 'rechazado' && c.estado !== 'pagado').reduce((s, c) => s + (c.saldo ?? c.monto), 0)
   const saldoPrestamos = prestamos.reduce((s, p) => s + p.saldo, 0)
-
-  const TABS: { key: Tab; label: string }[] = [
-    { key: 'pagar',       label: 'Cuentas por pagar'    },
-    { key: 'movimientos', label: 'Vista general'         },
-    { key: 'calculadora', label: 'Calculadora 4×1000'   },
-  ]
+  const vencidasPagar  = porPagar.filter((p) => p.estado !== 'pagado' && p.estado !== 'rechazado' && p.fechaVencimiento < todayISO()).length
 
   return (
     <div className="page">
-      <PageHeader title="Pagos y finanzas" subtitle="Cuentas por pagar, movimientos y herramientas financieras." />
+      <PageHeader title="Pagos y finanzas" subtitle="Cuentas por pagar, movimientos operativos y vencimientos." />
       {!canWrite && <ReadOnlyBanner />}
 
       <div className="grid grid--kpi" style={{ marginBottom: 20 }}>
-        <KpiTile label="Total por pagar"  value={formatCOP(totalPagar)}    icon={<ArrowUpCircle size={16} />}   accent="rose"    />
-        <KpiTile label="Total por cobrar" value={formatCOP(totalCobrar)}   icon={<ArrowDownCircle size={16} />} accent="emerald" />
-        <KpiTile label="Saldo préstamos"  value={formatCOP(saldoPrestamos)} icon={<Landmark size={16} />}       accent="brown"   />
-        <KpiTile label="4×1000 estimado total" value={formatCOP(totalPagar * 0.004)} icon={<Wallet size={16} />} accent="amber" />
+        <KpiTile label="Por pagar (saldo)"  value={formatCOP(totalPagar)}    icon={<ArrowUpCircle size={16} />}   accent="rose"    />
+        <KpiTile label="Por cobrar (saldo)" value={formatCOP(totalCobrar)}   icon={<ArrowDownCircle size={16} />} accent="emerald" />
+        <KpiTile label="Saldo préstamos"    value={formatCOP(saldoPrestamos)} icon={<Landmark size={16} />}       accent="brown"   />
+        <KpiTile label="Vencidas sin pagar" value={vencidasPagar}             icon={<Wallet size={16} />}         accent="amber"   />
       </div>
 
-      <div className="segment" role="tablist" style={{ marginBottom: 18, flexWrap: 'wrap' }}>
-        {TABS.map((t) => (
+      <div className="segment" role="tablist" style={{ marginBottom: 18 }}>
+        {([{ key: 'pagar', label: 'Cuentas por pagar' }, { key: 'movimientos', label: 'Vista general' }] as { key: Tab; label: string }[]).map((t) => (
           <button key={t.key} role="tab" aria-selected={tab === t.key}
             className={`segment__btn ${tab === t.key ? 'segment__btn--active' : ''}`}
             onClick={() => setTab(t.key)}>
@@ -488,7 +567,6 @@ export function FinanzasPage() {
 
       {tab === 'pagar'       && <PagarTab canWrite={canWrite} />}
       {tab === 'movimientos' && <MovimientosTab />}
-      {tab === 'calculadora' && <CalculadoraTab />}
     </div>
   )
 }

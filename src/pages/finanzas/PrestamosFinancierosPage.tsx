@@ -29,8 +29,10 @@ export function PrestamosFinancierosPage() {
   const [nCapital,   setNCapital]   = useState('')
   const [nTasa,      setNTasa]      = useState('')
   const [nPlazo,     setNPlazo]     = useState('')
-  const [nDesc,      setNDesc]      = useState('')
-  const [nEstado,    setNEstado]    = useState('pendiente')
+  const [nDesc,         setNDesc]         = useState('')
+  const [nEstado,       setNEstado]       = useState('pendiente')
+  const [nValorMat,     setNValorMat]     = useState('')
+  const [nPctAdelanto,  setNPctAdelanto]  = useState('90')
 
   // Modal abono
   const [abonando,      setAbonando]      = useState<Prestamo | null>(null)
@@ -53,16 +55,20 @@ export function PrestamosFinancierosPage() {
     const cuota   = nTipo === 'bancario' && plazo > 0
       ? Math.round(capital * tasa / 100 / (1 - Math.pow(1 + tasa / 100, -plazo)))
       : 0
+    const valorMaterial   = nTipo === 'rotativo' && nValorMat ? Number(nValorMat) : undefined
+    const pctAdelanto     = nTipo === 'rotativo' ? Number(nPctAdelanto) || 90 : undefined
     add('prestamos', {
       id: `l${Date.now()}`, entidad: nEntidad, tipo: nTipo,
       capital, interesPct: tasa, plazoMeses: plazo,
       saldo: capital, cuotaMensual: cuota,
       estado: nEstado as Prestamo['estado'],
       descripcion: nDesc || undefined,
+      valorMaterial, porcentajeAdelanto: pctAdelanto,
       pagosAbono: [],
     } as Prestamo)
     setModalNuevo(false)
     setNEntidad(''); setNTipo('bancario'); setNCapital(''); setNTasa(''); setNPlazo(''); setNDesc(''); setNEstado('pendiente')
+    setNValorMat(''); setNPctAdelanto('90')
   }
 
   const abrirAbono = (p: Prestamo) => {
@@ -101,11 +107,16 @@ export function PrestamosFinancierosPage() {
         {/* Fila principal */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: '12rem' }}>
-            <p style={{ fontWeight: 700, margin: 0 }}>{p.entidad}</p>
+            <p style={{ fontWeight: 700, margin: 0 }}>
+              {p.entidad}
+              {p.tipo === 'rotativo' && <span className="badge badge--info" style={{ marginLeft: '0.5rem', fontSize: '0.65rem', verticalAlign: 'middle' }}>ROTATIVO</span>}
+            </p>
             <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', margin: '0.125rem 0 0' }}>
               {p.tipo === 'bancario'
                 ? `Capital ${formatCOP(p.capital)} · Tasa ${p.interesPct}% mensual · Plazo ${p.plazoMeses} meses`
-                : p.descripcion ?? 'Crédito rotativo'}
+                : p.valorMaterial
+                  ? `Material: ${formatCOP(p.valorMaterial)} · Adelanto ${p.porcentajeAdelanto ?? 90}% = ${formatCOP(p.valorMaterial * ((p.porcentajeAdelanto ?? 90) / 100))}`
+                  : p.descripcion ?? 'Crédito rotativo'}
             </p>
           </div>
 
@@ -279,7 +290,17 @@ export function PrestamosFinancierosPage() {
             </>
           )}
           {nTipo === 'rotativo' && (
-            <Input label="Descripción" placeholder="Adelanto de material por viaje…" value={nDesc} onChange={(e) => setNDesc(e.target.value)} style={{ gridColumn: '1/-1' }} />
+            <>
+              <Input label="Valor del material (total factura)" type="number" placeholder="50000000" value={nValorMat} onChange={(e) => setNValorMat(e.target.value)} />
+              <Input label="Porcentaje de adelanto (%)" type="number" min={1} max={100} value={nPctAdelanto} onChange={(e) => setNPctAdelanto(e.target.value)} />
+              {nValorMat && Number(nValorMat) > 0 && (
+                <div className="callout" style={{ gridColumn: '1/-1' }}>
+                  Monto de adelanto: <strong>{formatCOP(Number(nValorMat) * ((Number(nPctAdelanto) || 90) / 100))}</strong>
+                  {' '}({nPctAdelanto}% de {formatCOP(Number(nValorMat))})
+                </div>
+              )}
+              <Input label="Descripción (opcional)" placeholder="Adelanto de material por viaje…" value={nDesc} onChange={(e) => setNDesc(e.target.value)} style={{ gridColumn: '1/-1' }} />
+            </>
           )}
           <Select label="Estado" options={estadoOptions} value={nEstado} onChange={(e) => setNEstado(e.target.value)} />
         </div>
