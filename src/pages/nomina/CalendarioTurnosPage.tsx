@@ -15,11 +15,11 @@ const VALOR_HORA = 8_000
 const RECARGO: Record<string, number> = { diurno: 1, tarde: 1.25, nocturno: 1.35 }
 
 const TIPO_OPTS = [
-  { value: '',         label: 'Sin turno (limpiar)' },
-  { value: 'diurno',   label: 'D — Diurno (6am–2pm)' },
-  { value: 'tarde',    label: 'T — Tarde (2pm–10pm)'  },
-  { value: 'nocturno', label: 'N — Nocturno (10pm–6am)' },
-  { value: 'ausente',  label: 'A — Ausente'            },
+  { value: '',         label: 'Sin turno (limpiar)'         },
+  { value: 'diurno',   label: 'Turno 1 — 6:00 AM a 2:00 PM'  },
+  { value: 'tarde',    label: 'Turno 2 — 2:00 PM a 10:00 PM' },
+  { value: 'nocturno', label: 'Turno 3 — 10:00 PM a 6:00 AM' },
+  { value: 'ausente',  label: 'A — Ausente'                  },
 ]
 
 interface CeldaEdit {
@@ -31,15 +31,17 @@ interface CeldaEdit {
 function cellInfo(t: Turno | undefined): { cls: string; label: string } {
   if (!t) return { cls: '', label: '' }
   if (!t.presente) return { cls: 'cal-cell--ausente', label: 'A' }
-  if (t.tipo === 'nocturno') return { cls: 'cal-cell--n', label: 'N' }
-  if (t.tipo === 'tarde')    return { cls: 'cal-cell--t', label: 'T' }
-  return { cls: 'cal-cell--d', label: 'D' }
+  if (t.tipo === 'nocturno') return { cls: 'cal-cell--n', label: 'T3' }
+  if (t.tipo === 'tarde')    return { cls: 'cal-cell--t', label: 'T2' }
+  return { cls: 'cal-cell--d', label: 'T1' }
 }
 
 export function CalendarioTurnosPage() {
   const canWrite = useCanWrite('nomina')
-  const { turnos, empleados, add, update, remove } = useData()
-  const [mes, setMes]         = useState(todayISO().slice(0, 7))
+  const { turnos, empleados: todosEmpleados, add, update, remove } = useData()
+  // Solo empleados por hora necesitan control de asistencia
+  const empleados = useMemo(() => todosEmpleados.filter(e => e.tipoContrato !== 'fijo'), [todosEmpleados])
+  const [mes, setMes]           = useState(todayISO().slice(0, 7))
   const [quincena, setQuincena] = useState<Quincena>('q1')
 
   // Modal edición de celda
@@ -147,9 +149,9 @@ export function CalendarioTurnosPage() {
       </Card>
 
       <div className="cal-legend">
-        <span className="cal-legend__item"><span className="cal-legend__swatch cal-cell--d" />D — Diurno (6am–2pm)</span>
-        <span className="cal-legend__item"><span className="cal-legend__swatch cal-cell--t" />T — Tarde (2pm–10pm)</span>
-        <span className="cal-legend__item"><span className="cal-legend__swatch cal-cell--n" />N — Nocturno (10pm–6am)</span>
+        <span className="cal-legend__item"><span className="cal-legend__swatch cal-cell--d" />T1 — 6:00 AM a 2:00 PM</span>
+        <span className="cal-legend__item"><span className="cal-legend__swatch cal-cell--t" />T2 — 2:00 PM a 10:00 PM</span>
+        <span className="cal-legend__item"><span className="cal-legend__swatch cal-cell--n" />T3 — 10:00 PM a 6:00 AM</span>
         <span className="cal-legend__item"><span className="cal-legend__swatch cal-cell--ausente" />A — Ausente</span>
         <span className="cal-legend__item"><span className="cal-legend__swatch" style={{ border: '1px solid var(--border-default)' }} />Sin turno</span>
       </div>
@@ -211,9 +213,9 @@ export function CalendarioTurnosPage() {
             <thead>
               <tr>
                 <th>Empleado</th>
-                <th style={{ textAlign: 'center' }}>Turnos D</th>
-                <th style={{ textAlign: 'center' }}>Turnos T</th>
-                <th style={{ textAlign: 'center' }}>Turnos N</th>
+                <th style={{ textAlign: 'center' }}>Turno 1</th>
+                <th style={{ textAlign: 'center' }}>Turno 2</th>
+                <th style={{ textAlign: 'center' }}>Turno 3</th>
                 <th style={{ textAlign: 'center' }}>Ausencias</th>
                 <th style={{ textAlign: 'right' }}>Horas</th>
                 <th style={{ textAlign: 'right' }}>Liquidación est.</th>
