@@ -16,6 +16,18 @@ const ESTADO_LOTE: Record<string, { label: string; badge: string }> = {
   enviado_completo:     { label: 'Enviado completo',     badge: 'badge--success' },
 }
 
+const GROUP_TH: React.CSSProperties = {
+  textAlign: 'center', fontSize: '0.62rem', letterSpacing: '0.05em', textTransform: 'uppercase',
+  color: 'var(--text-muted)', background: '#f6f5f3', borderBottom: '1px solid #e5e7eb',
+  fontWeight: 700, padding: '4px 6px',
+}
+
+function fmtDMY(iso: string) {
+  if (!iso) return '—'
+  const [y, m, d] = iso.split('-')
+  return `${d}/${m}/${y.slice(2)}`
+}
+
 type Tab = 'lotes' | 'procesamiento'
 
 // ── Tab A: Lotes de concentrado ────────────────────────────────────
@@ -280,17 +292,20 @@ function LotesTab() {
             <thead>
               <tr>
                 <th style={{ width: '1.5rem' }}></th>
-                <th>Código</th><th>Estado</th><th>F. inicio</th><th>F. fin</th>
-                <th style={{ textAlign: 'right' }}>Producido</th>
-                <th style={{ textAlign: 'right' }}>Disponible</th>
-                <th style={{ textAlign: 'right' }}>Maquila</th>
-                <th>Proceso</th><th>Canoa</th>
+                <th>Código</th>
+                <th>Estado</th>
+                <th>Fechas</th>
+                <th>Proceso</th>
+                <th style={{ textAlign: 'right' }}>Mat. procesado</th>
+                <th style={{ textAlign: 'right' }}>Concentrado</th>
+                <th style={{ textAlign: 'right' }}>Tenor real</th>
+                <th style={{ textAlign: 'right' }}>Costo maquila</th>
                 {canWrite && <th></th>}
               </tr>
             </thead>
             <tbody>
               {lotesFiltrados.length === 0 && (
-                <tr><td colSpan={canWrite ? 11 : 10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Sin registros</td></tr>
+                <tr><td colSpan={canWrite ? 10 : 9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Sin registros</td></tr>
               )}
               {lotesFiltrados.map(l => {
                 const isExp  = expanded.has(l.id)
@@ -309,25 +324,31 @@ function LotesTab() {
                           {ESTADO_LOTE[l.estado]?.label ?? l.estado}
                         </span>
                       </td>
-                      <td style={{ fontSize: 'var(--fs-sm)' }}>{formatDate(l.fecha_inicio)}</td>
-                      <td style={{ fontSize: 'var(--fs-sm)' }}>{l.fecha_fin ? formatDate(l.fecha_fin) : '—'}</td>
-                      <td style={{ textAlign: 'right' }} className="mono">
-                        {l.toneladas_humedo > 0
-                          ? `${l.toneladas_humedo.toFixed(2)} t`
-                          : (l.material_seco_procesado ?? 0) > 0
-                            ? `${(l.material_seco_procesado ?? 0).toFixed(3)} t seco`
-                            : '—'}
-                      </td>
-                      <td style={{ textAlign: 'right', fontWeight: l.toneladas_disponibles > 0 ? 700 : undefined, color: l.toneladas_disponibles > 0 ? 'var(--emerald-700)' : undefined }} className="mono">
-                        {l.toneladas_disponibles > 0 ? `${l.toneladas_disponibles.toFixed(2)} t` : '—'}
-                      </td>
-                      <td style={{ textAlign: 'right' }} className="mono">
-                        {l.maquila_total > 0 ? cop(l.maquila_total) : '—'}
+                      <td style={{ fontSize: 'var(--fs-sm)', whiteSpace: 'nowrap' }} className="mono">
+                        {fmtDMY(l.fecha_inicio)} <span style={{ color: 'var(--text-faint)' }}>→</span> {l.fecha_fin ? fmtDMY(l.fecha_fin) : '—'}
                       </td>
                       <td style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
-                        {[l.hizo_molienda && 'Mol', l.hizo_flotacion && 'Flot', l.hizo_filtroprensa && 'Fil'].filter(Boolean).join('·') || '—'}
+                        {[l.hizo_molienda && 'Mol', l.hizo_flotacion && 'Flot', l.hizo_filtroprensa && 'Fil'].filter(Boolean).join(' · ') || '—'}
                       </td>
-                      <td style={{ fontSize: 'var(--fs-sm)' }}>{l.ubicacion_canoa ?? '—'}</td>
+                      <td style={{ textAlign: 'right' }} className="mono">
+                        {(l.material_seco_procesado ?? 0) > 0 ? `${(l.material_seco_procesado ?? 0).toFixed(3)} t` : '—'}
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: l.toneladas_humedo > 0 ? 700 : undefined, color: l.toneladas_humedo > 0 ? 'var(--emerald-700)' : undefined }} className="mono">
+                        {l.toneladas_humedo > 0 ? `${l.toneladas_humedo.toFixed(2)} t` : '—'}
+                        {l.toneladas_disponibles > 0 && l.toneladas_disponibles !== l.toneladas_humedo && (
+                          <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', fontWeight: 400 }}>disp {l.toneladas_disponibles.toFixed(2)}</div>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: analExist ? 'var(--amber-700)' : undefined }} className="mono">
+                        {analExist ? `${analExist.au_gr_x_ton.toFixed(2)} g/t` : <em style={{ color: 'var(--text-faint)', fontWeight: 400 }}>—</em>}
+                      </td>
+                      <td style={{ textAlign: 'right' }} className="mono">
+                        {l.maquila_total > 0
+                          ? cop(l.maquila_total)
+                          : (l.material_seco_procesado ?? 0) > 0
+                            ? <span style={{ color: 'var(--text-muted)' }}>{cop((l.material_seco_procesado ?? 0) * (l.precio_maquila_por_ton ?? 300000))}</span>
+                            : '—'}
+                      </td>
                       {canWrite && (
                         <td onClick={e => e.stopPropagation()}>
                           <div className="row" style={{ gap: 4 }}>
@@ -345,7 +366,7 @@ function LotesTab() {
 
                     {isExp && (
                       <tr style={{ background: 'var(--slate-50)' }}>
-                        <td colSpan={canWrite ? 11 : 10} style={{ padding: '0.75rem 1rem 1rem 2rem' }}>
+                        <td colSpan={canWrite ? 10 : 9} style={{ padding: '0.75rem 1rem 1rem 2rem' }}>
                           <p style={{ fontWeight: 600, fontSize: 'var(--fs-sm)', marginBottom: '0.5rem' }}>
                             Materiales procesados ({matVin.length}):
                           </p>
@@ -640,16 +661,29 @@ function LotesTab() {
                     </table>
                   </div>
                 )}
-                {canWrite && editarLote.estado === 'en_proceso' && (
-                  <Button size="sm" variant="secondary" icon={<Plus size={14}/>} style={{ marginTop: '0.75rem' }}
-                    onClick={() => { setEditarLote(null); abrirVincular(editarLote) }}>
-                    + Agregar más materiales
-                  </Button>
-                )}
-                {editarLote.estado !== 'en_proceso' && (
-                  <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                    El lote está en estado <strong>{ESTADO_LOTE[editarLote.estado]?.label}</strong>. Solo se pueden editar código, fecha y ubicación.
-                  </p>
+                {canWrite && (
+                  editarLote.estado === 'en_proceso' ? (
+                    <Button size="sm" variant="secondary" icon={<Plus size={14}/>} style={{ marginTop: '0.75rem' }}
+                      onClick={() => { setEditarLote(null); abrirVincular(editarLote) }}>
+                      + Agregar más materiales
+                    </Button>
+                  ) : (
+                    <div style={{ marginTop: '0.75rem' }}>
+                      <Button size="sm" variant="secondary" icon={<Plus size={14}/>}
+                        onClick={() => {
+                          if (!confirm(`El lote ${editarLote.codigo} está cerrado (${ESTADO_LOTE[editarLote.estado]?.label}). ¿Reabrirlo para agregar materiales? Podrás volver a cerrarlo después.`)) return
+                          const lote = { ...editarLote, estado: 'en_proceso' as const }
+                          setLotes(prev => prev.map(l => l.id === editarLote.id ? lote : l))
+                          setEditarLote(null)
+                          abrirVincular(lote)
+                        }}>
+                        Reabrir lote y agregar materiales
+                      </Button>
+                      <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                        El lote está <strong>{ESTADO_LOTE[editarLote.estado]?.label}</strong>. Reabrirlo lo pone «En proceso» para poder vincular más materiales.
+                      </p>
+                    </div>
+                  )
                 )}
               </div>
             </>
@@ -712,7 +746,9 @@ function LotesTab() {
 // ── Tab B: Procesamiento material ──────────────────────────────────
 function ProcesamientoTab() {
   const canWrite = useCanWrite('materiales')
-  const { lotes, materiales, setMateriales } = useMateriales()
+  const { lotes, materiales, setMateriales, analisis } = useMateriales()
+
+  const [expandedRow, setExpandedRow] = useState<number | null>(null)
 
   const procesados = materiales.filter(m => m.lote !== null)
   const totalHum   = procesados.reduce((s, m) => s + m.peso_llegada_planta, 0)
@@ -744,6 +780,14 @@ function ProcesamientoTab() {
           <table className="data-table">
             <thead>
               <tr>
+                <th style={{ background: '#f6f5f3', borderBottom: '1px solid #e5e7eb' }}></th>
+                <th colSpan={4} style={GROUP_TH}>Identificación</th>
+                <th colSpan={3} style={GROUP_TH}>Pesos y ley</th>
+                <th style={GROUP_TH}>Estado</th>
+                {canWrite && <th style={{ background: '#f6f5f3', borderBottom: '1px solid #e5e7eb' }}></th>}
+              </tr>
+              <tr>
+                <th style={{ width: '1.5rem' }}></th>
                 <th>Lote</th><th>Vol.</th><th>Mina</th><th>Fecha</th>
                 <th style={{ textAlign: 'right' }}>T. Aportadas</th>
                 <th style={{ textAlign: 'right' }}>T. Seco</th>
@@ -755,8 +799,13 @@ function ProcesamientoTab() {
             <tbody>
               {procesados.map(m => {
                 const lote = lotes.find(l => l.codigo === m.lote)
+                const isExp = expandedRow === m.id
+                const anals = analisis.filter(a => a.id_entrada === m.id)
                 return (
-                  <tr key={m.id}>
+                  <React.Fragment key={m.id}>
+                  <tr style={{ cursor: 'pointer', ...(isExp ? { background: 'var(--slate-50)' } : {}) }}
+                    onClick={() => setExpandedRow(isExp ? null : m.id)}>
+                    <td style={{ color: 'var(--text-muted)' }}>{isExp ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</td>
                     <td style={{ fontWeight: 700 }} className="mono">{m.lote}</td>
                     <td className="mono" style={{ fontSize: 'var(--fs-sm)' }}>{m.numero_volqueta}</td>
                     <td style={{ fontWeight: 600 }}>{m.mina}</td>
@@ -772,7 +821,7 @@ function ProcesamientoTab() {
                         : <em style={{ color: 'var(--text-faint)' }}>—</em>}
                     </td>
                     {canWrite && (
-                      <td>
+                      <td onClick={e => e.stopPropagation()}>
                         {lote?.estado === 'en_proceso' && (
                           <Button variant="ghost" size="sm" icon={<Trash2 size={13}/>} title="Desvincular del lote"
                             onClick={() => desvincular(m)} />
@@ -780,12 +829,68 @@ function ProcesamientoTab() {
                       </td>
                     )}
                   </tr>
+
+                  {isExp && (
+                    <tr>
+                      <td colSpan={canWrite ? 10 : 9} style={{ padding: '0.85rem 1.25rem', background: '#fafaf9' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '1.25rem' }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 'var(--fs-sm)', marginBottom: '0.5rem', color: 'var(--amber-800)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                              <FlaskConical size={14}/> Análisis del material ({anals.length})
+                            </div>
+                            {anals.length === 0 ? (
+                              <em style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-sm)' }}>Sin análisis registrado para este material.</em>
+                            ) : (
+                              <table style={{ width: '100%', fontSize: 'var(--fs-xs)', borderCollapse: 'collapse' }}>
+                                <thead><tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
+                                  <th style={{ padding: '2px 6px' }}>Tipo</th>
+                                  <th style={{ padding: '2px 6px' }}>N.° análisis</th>
+                                  <th style={{ padding: '2px 6px', textAlign: 'right' }}>T. seco</th>
+                                  <th style={{ padding: '2px 6px', textAlign: 'right' }}>Au gr/t</th>
+                                  <th style={{ padding: '2px 6px', textAlign: 'right' }}>Ag gr/t</th>
+                                  <th style={{ padding: '2px 6px', textAlign: 'right' }}>Au total</th>
+                                </tr></thead>
+                                <tbody>
+                                  {anals.map(a => {
+                                    const tipo = a.tipo ?? 'cabeza'
+                                    const col = tipo === 'sulfuros' ? '#065f46' : tipo === 'colas' ? '#9f1239' : '#0c4a6e'
+                                    return (
+                                      <tr key={a.id} style={{ borderTop: '1px solid #e5e7eb' }}>
+                                        <td style={{ padding: '3px 6px' }}><span style={{ fontWeight: 700, color: col, textTransform: 'capitalize' }}>{tipo}</span></td>
+                                        <td style={{ padding: '3px 6px', fontFamily: 'var(--font-mono)' }}>{a.numero_analisis}</td>
+                                        <td style={{ padding: '3px 6px', textAlign: 'right' }} className="mono">{a.toneladas_secas != null ? a.toneladas_secas.toFixed(4) : '—'}</td>
+                                        <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 700, color: 'var(--amber-700)' }} className="mono">{a.au_gr_x_ton.toFixed(2)}</td>
+                                        <td style={{ padding: '3px 6px', textAlign: 'right' }} className="mono">{a.ag_gr_x_ton != null ? a.ag_gr_x_ton.toFixed(0) : '—'}</td>
+                                        <td style={{ padding: '3px 6px', textAlign: 'right' }} className="mono">{a.au_concentrado != null ? `${a.au_concentrado.toFixed(1)} g` : '—'}</td>
+                                      </tr>
+                                    )
+                                  })}
+                                </tbody>
+                              </table>
+                            )}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 'var(--fs-sm)', marginBottom: '0.5rem', color: 'var(--amber-800)' }}>Detalle</div>
+                            <div style={{ fontSize: 'var(--fs-sm)', display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.15rem 0.75rem' }}>
+                              <span style={{ color: 'var(--text-muted)' }}>Lote</span><strong className="mono">{m.lote}</strong>
+                              <span style={{ color: 'var(--text-muted)' }}>Peso húmedo</span><strong className="mono">{m.peso_llegada_planta.toFixed(3)} t</strong>
+                              <span style={{ color: 'var(--text-muted)' }}>Humedad</span><strong className="mono">{m.porcentaje_humedad > 0 ? `${(m.porcentaje_humedad * 100).toFixed(1)}%` : 'S/A'}</strong>
+                              <span style={{ color: 'var(--text-muted)' }}>Ton secas</span><strong className="mono">{m.total_material_seco.toFixed(4)} t</strong>
+                              <span style={{ color: 'var(--text-muted)' }}>Tenor Au</span><strong className="mono">{m.tenor > 0 ? `${m.tenor.toFixed(2)} g/t` : 'S/A'}</strong>
+                              <span style={{ color: 'var(--text-muted)' }}>Estado lote</span><span>{lote ? <span className={`badge ${ESTADO_LOTE[lote.estado]?.badge ?? 'badge--neutral'}`}>{ESTADO_LOTE[lote.estado]?.label}</span> : '—'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 )
               })}
             </tbody>
             <tfoot>
               <tr style={{ fontWeight: 700 }}>
-                <td colSpan={4}>Total ({procesados.length})</td>
+                <td colSpan={5}>Total ({procesados.length})</td>
                 <td style={{ textAlign: 'right' }} className="mono">{totalHum.toFixed(3)} t</td>
                 <td style={{ textAlign: 'right' }} className="mono">{totalSec.toFixed(4)} t</td>
                 <td colSpan={canWrite ? 3 : 2} />

@@ -57,6 +57,7 @@
 }
 .cal-cell:hover { outline: 0.125rem solid var(--color-primary); }
 .cal-cell--d { background: var(--green-100); color: var(--green-800); }
+.cal-cell--t { background: var(--amber-100, #fef3c7); color: var(--amber-800, #92400e); }
 .cal-cell--n { background: var(--brown-100); color: var(--brown-700); }
 .cal-cell--ausente { background: var(--rose-100); color: var(--rose-700); }
 .cal-cell:disabled { cursor: default; }

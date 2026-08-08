@@ -93,9 +93,10 @@ export const seedPorCobrar: CuentaPorCobrar[] = [
 ]
 
 export const seedPrestamos: Prestamo[] = [
-  { id: 'l1', entidad: 'Banco Agrario', capital: 120000000, interesPct: 1.8, plazoMeses: 24, saldo: 84000000, cuotaMensual: 6200000, estado: 'aprobado' },
-  { id: 'l2', entidad: 'Bancolombia', capital: 80000000, interesPct: 1.5, plazoMeses: 18, saldo: 52000000, cuotaMensual: 5100000, estado: 'aprobado' },
-  { id: 'l3', entidad: 'Cooperativa Minera', capital: 45000000, interesPct: 2.1, plazoMeses: 12, saldo: 45000000, cuotaMensual: 4300000, estado: 'pendiente' },
+  { id: 'l1', entidad: 'Banco Agrario', tipo: 'bancario', capital: 120000000, interesPct: 1.8, plazoMeses: 24, saldo: 84000000, cuotaMensual: 6200000, estado: 'aprobado', pagosAbono: [] },
+  { id: 'l2', entidad: 'Bancolombia', tipo: 'bancario', capital: 80000000, interesPct: 1.5, plazoMeses: 18, saldo: 52000000, cuotaMensual: 5100000, estado: 'aprobado', pagosAbono: [] },
+  { id: 'l3', entidad: 'Cooperativa Minera', tipo: 'bancario', capital: 45000000, interesPct: 2.1, plazoMeses: 12, saldo: 45000000, cuotaMensual: 4300000, estado: 'pendiente', pagosAbono: [] },
+  { id: 'l4', entidad: 'Rotativo Barranquilla', tipo: 'rotativo', capital: 15000000, interesPct: 0, plazoMeses: 0, saldo: 8500000, cuotaMensual: 0, estado: 'aprobado', descripcion: 'Adelanto de material por viaje — disponible cuando hay fondos en Barranquilla.', pagosAbono: [] },
 ]
 
 export const seedPlantas: Planta[] = [
@@ -104,10 +105,10 @@ export const seedPlantas: Planta[] = [
 ]
 
 export const seedEmpleados: Empleado[] = [
-  { id: 'em1', nombre: 'Sandra Ruiz', documento: '43.222.111', cargo: 'Operaria de molienda', plantaId: 'pl1', salarioBase: 1650000, activo: true },
-  { id: 'em2', nombre: 'Jorge Betancur', documento: '70.555.333', cargo: 'Laboratorista', plantaId: 'pl1', salarioBase: 2100000, activo: true },
-  { id: 'em3', nombre: 'Diana Loaiza', documento: '32.888.444', cargo: 'Auxiliar administrativa', plantaId: 'pl2', salarioBase: 1500000, activo: true },
-  { id: 'em4', nombre: 'Camilo Ríos', documento: '10.444.777', cargo: 'Operario de planta', plantaId: 'pl2', salarioBase: 1620000, activo: true },
+  { id: 'em1', nombre: 'Sandra Ruiz',    documento: '43.222.111', cargo: 'Operaria de molienda',    plantaId: 'pl1', salarioBase: 1650000, tipoContrato: 'hora', activo: true },
+  { id: 'em2', nombre: 'Jorge Betancur', documento: '70.555.333', cargo: 'Laboratorista',            plantaId: 'pl1', salarioBase: 2100000, tipoContrato: 'fijo', activo: true },
+  { id: 'em3', nombre: 'Diana Loaiza',   documento: '32.888.444', cargo: 'Auxiliar administrativa',  plantaId: 'pl2', salarioBase: 1500000, tipoContrato: 'fijo', activo: true },
+  { id: 'em4', nombre: 'Camilo Ríos',    documento: '10.444.777', cargo: 'Operario de planta',       plantaId: 'pl2', salarioBase: 1620000, tipoContrato: 'hora', activo: true },
 ]
 
 // Genera turnos coherentes para la 1ª quincena de julio 2026 (días 1–15).

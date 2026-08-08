@@ -53,8 +53,28 @@ export async function apiDelete<T>(url: string): Promise<T> {
 
 export function apiErrorMessage(err: unknown): string {
   if (axios.isAxiosError(err)) {
-    const msg = (err.response?.data as { message?: string })?.message
-    return msg ?? err.message
+    const data = err.response?.data as { message?: string; error?: string } | undefined
+    return data?.error ?? data?.message ?? err.message
   }
   return err instanceof Error ? err.message : 'Error desconocido'
+}
+
+// Información de error enriquecida: mensaje + `code` de conflicto (409) + status HTTP.
+// El backend Molinos responde `{ success:false, error, code? }` en fallos.
+export interface ApiErrorInfo {
+  message: string
+  code?: string
+  status?: number
+}
+
+export function apiError(err: unknown): ApiErrorInfo {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data as { message?: string; error?: string; code?: string } | undefined
+    return {
+      message: data?.error ?? data?.message ?? err.message,
+      code: data?.code,
+      status: err.response?.status,
+    }
+  }
+  return { message: err instanceof Error ? err.message : 'Error desconocido' }
 }

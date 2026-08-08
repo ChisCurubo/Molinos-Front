@@ -1,7 +1,8 @@
 import { NavLink } from 'react-router-dom'
 import {
-  BarChart3, Boxes, CalendarDays, Coins, Droplets, FlaskConical, HandCoins, Home,
-  Landmark, Layers, Mountain, Package, PackagePlus, Send, Truck, UserCog, Users2, Wallet, type LucideIcon,
+  ArrowDownCircle, BarChart3, Banknote, Boxes, CalendarDays, ClipboardList, Cloud, Coins, Container, Droplets, Factory,
+  FlaskConical, HandCoins, Home, Landmark, Layers, Mountain, Package, PackagePlus, Send,
+  Truck, UserCog, Users2, Wallet, type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { canView, ROLES, type ModuleKey } from '@/auth/permissions'
@@ -30,9 +31,21 @@ const GROUPS: NavGroup[] = [
       { to: '/materiales/inventario',       label: 'Inventario',             icon: Package      },
       { to: '/materiales/viajes-material',  label: 'Viajes material',        icon: Send         },
       { to: '/materiales/viajes',           label: 'Viajes de agua',         icon: Droplets     },
-      { to: '/materiales/zonas',       label: 'Catálogos y precios',     icon: Mountain },
-      { to: '/materiales/volquetas',   label: 'Volquetas',               icon: Truck },
-      { to: '/materiales/informes',    label: 'Informes de material',    icon: BarChart3 },
+      { to: '/materiales/mulas',            label: 'Mulas',                  icon: Container    },
+      { to: '/materiales/pago-material',    label: 'Pago de material',       icon: Banknote     },
+      { to: '/materiales/zonas',            label: 'Catálogos y precios',    icon: Mountain     },
+      { to: '/materiales/volquetas',        label: 'Volquetas',              icon: Truck        },
+      { to: '/materiales/informes',         label: 'Informes de material',   icon: BarChart3    },
+    ],
+  },
+  {
+    module: 'materiales',
+    label: 'Materiales · API',
+    icon: Cloud,
+    items: [
+      { to: '/materiales/entradas-api',  label: 'Entradas de material',   icon: PackagePlus  },
+      { to: '/materiales/analisis-api',  label: 'Análisis y laboratorio', icon: FlaskConical },
+      { to: '/materiales/catalogos-api', label: 'Catálogos y precios',    icon: Mountain     },
     ],
   },
   {
@@ -40,9 +53,10 @@ const GROUPS: NavGroup[] = [
     label: 'Pagos y finanzas',
     icon: Coins,
     items: [
-      { to: '/finanzas', label: 'Cuentas por pagar y cobrar', icon: Wallet },
-      { to: '/finanzas/prestamos', label: 'Préstamos financieros', icon: Landmark },
-      { to: '/finanzas/informes', label: 'Informes de finanzas', icon: BarChart3 },
+      { to: '/finanzas',          label: 'Cuentas por pagar',    icon: Wallet           },
+      { to: '/finanzas/cobrar',   label: 'Cuentas por cobrar',   icon: ArrowDownCircle  },
+      { to: '/finanzas/prestamos', label: 'Préstamos financieros', icon: Landmark        },
+      { to: '/finanzas/informes', label: 'Informes de finanzas',  icon: BarChart3        },
     ],
   },
   {
@@ -50,9 +64,17 @@ const GROUPS: NavGroup[] = [
     label: 'Nómina',
     icon: Users2,
     items: [
-      { to: '/nomina', label: 'Empleados y préstamos', icon: HandCoins },
-      { to: '/nomina/calendario', label: 'Calendario de turnos', icon: CalendarDays },
-      { to: '/nomina/informes', label: 'Informes de nómina', icon: BarChart3 },
+      { to: '/nomina',            label: 'Empleados y préstamos', icon: HandCoins    },
+      { to: '/nomina/calendario', label: 'Calendario de turnos',  icon: CalendarDays },
+      { to: '/nomina/informes',   label: 'Informes de nómina',    icon: BarChart3    },
+    ],
+  },
+  {
+    module: 'planta',
+    label: 'Planta y producción',
+    icon: Factory,
+    items: [
+      { to: '/planta/calendario', label: 'Calendario de planta', icon: ClipboardList },
     ],
   },
 ]
@@ -88,7 +110,7 @@ export function Sidebar({ open, onNavigate }: SidebarProps) {
       {leaf({ to: '/', label: isAdmin ? 'Panel de administración' : 'Panel principal', icon: Home })}
 
       {GROUPS.filter((g) => canView(user.role, g.module)).map((g) => (
-        <div key={g.module}>
+        <div key={g.label}>
           <div className="sidebar__group-label">
             <g.icon size={16} aria-hidden="true" />
             {g.label}

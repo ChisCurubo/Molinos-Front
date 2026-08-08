@@ -1,15 +1,23 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowRight, Package, Layers } from 'lucide-react'
 import { Button, Card, KpiTile } from '@/components/ui'
 import { PageHeader } from '@/components/common/Page'
-import { formatCOP, formatDate } from '@/utils/format'
+import { formatCOP } from '@/utils/format'
 import { useMateriales } from '@/context/MaterialesContext'
 
 const cop = formatCOP
 
+function fmtDMY(iso: string) {
+  if (!iso) return '—'
+  const [y, m, d] = iso.split('-')
+  return `${d}/${m}/${y.slice(2)}`
+}
+
 export function InventarioPage() {
   const navigate = useNavigate()
   const { materiales, lotes } = useMateriales()
+  const [tab, setTab] = useState<'material' | 'concentrado'>('material')
 
   const crudo = materiales.filter(
     m => (m.estado === 'pagada' || m.estado === 'pendiente') && m.lote === null,
@@ -35,8 +43,22 @@ export function InventarioPage() {
         <KpiTile label="T. húm. disponibles"   value={`${totalConcHum.toFixed(2)} t`}  accent="emerald" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', alignItems: 'start' }}>
-        {/* Panel A — Material crudo */}
+      <div className="segment" role="tablist" style={{ marginBottom: 18 }}>
+        <button role="tab" aria-selected={tab === 'material'}
+          className={`segment__btn ${tab === 'material' ? 'segment__btn--active' : ''}`}
+          onClick={() => setTab('material')}>
+          <Package size={14} style={{ verticalAlign: 'middle', marginRight: '0.375rem' }} />
+          Material crudo ({crudo.length})
+        </button>
+        <button role="tab" aria-selected={tab === 'concentrado'}
+          className={`segment__btn ${tab === 'concentrado' ? 'segment__btn--active' : ''}`}
+          onClick={() => setTab('concentrado')}>
+          <Layers size={14} style={{ verticalAlign: 'middle', marginRight: '0.375rem' }} />
+          Concentrado ({concentrado.length})
+        </button>
+      </div>
+
+      {tab === 'material' && (
         <Card
           title={`Material crudo pendiente (${crudo.length})`}
           actions={
@@ -67,7 +89,7 @@ export function InventarioPage() {
                       <tr key={m.id}>
                         <td className="mono" style={{ fontSize: 'var(--fs-sm)' }}>{m.numero_volqueta}</td>
                         <td style={{ fontWeight: 600 }}>{m.mina}</td>
-                        <td style={{ fontSize: 'var(--fs-sm)' }}>{formatDate(m.fecha)}</td>
+                        <td style={{ fontSize: 'var(--fs-sm)' }}>{fmtDMY(m.fecha)}</td>
                         <td style={{ textAlign: 'right' }} className="mono">{m.peso_llegada_planta.toFixed(3)} t</td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--green-700)' }} className="mono">
                           {m.total_material_seco.toFixed(4)} t
@@ -96,8 +118,9 @@ export function InventarioPage() {
             </>
           )}
         </Card>
+      )}
 
-        {/* Panel B — Concentrado disponible */}
+      {tab === 'concentrado' && (
         <Card
           title={`Concentrado disponible (${concentrado.length} lotes)`}
           actions={
@@ -164,7 +187,7 @@ export function InventarioPage() {
             </>
           )}
         </Card>
-      </div>
+      )}
     </div>
   )
 }

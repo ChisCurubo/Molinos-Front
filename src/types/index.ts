@@ -13,7 +13,7 @@ export interface User {
   ultimoAcceso?: string
 }
 
-export type EstadoGeneral = 'aprobado' | 'pendiente' | 'rechazado' | 'revision'
+export type EstadoGeneral = 'aprobado' | 'pendiente' | 'rechazado' | 'revision' | 'pagado'
 
 // --- Materiales ---
 export interface Volqueta {
@@ -77,16 +77,28 @@ export interface ViajeAgua {
 }
 
 // --- Finanzas ---
-export type TipoMovimiento = 'flete' | 'material' | 'proveedor' | 'gasto' | 'alquiler'
+export type TipoMovimiento = 'flete' | 'material' | 'proveedor' | 'gasto' | 'alquiler' | 'gasolina'
+
+export interface AbonoRegistro {
+  id: string
+  fecha: string
+  monto: number
+  comprobante?: string
+  nota?: string
+}
+
 export interface CuentaPorPagar {
   id: string
   concepto: string
   tipo: TipoMovimiento
   beneficiario: string
   monto: number
+  saldo?: number
+  abonosHistorial?: AbonoRegistro[]
   fechaVencimiento: string
   estado: EstadoGeneral
   origen: 'automatico' | 'manual'
+  comprobante?: string | null
 }
 
 export interface CuentaPorCobrar {
@@ -94,19 +106,35 @@ export interface CuentaPorCobrar {
   concepto: string
   cliente: string
   monto: number
+  saldo?: number
+  abonosHistorial?: AbonoRegistro[]
   fechaVencimiento: string
   estado: EstadoGeneral
+  comprobante?: string | null
+}
+
+export interface PagoAbono {
+  id: string
+  fecha: string
+  monto: number
+  comprobante?: string
+  nota?: string
 }
 
 export interface Prestamo {
   id: string
   entidad: string
+  tipo: 'bancario' | 'rotativo'
   capital: number
-  interesPct: number // tasa mensual
+  interesPct: number
   plazoMeses: number
   saldo: number
   cuotaMensual: number
   estado: EstadoGeneral
+  pagosAbono?: PagoAbono[]
+  descripcion?: string
+  valorMaterial?: number
+  porcentajeAdelanto?: number
 }
 
 // --- Nómina ---
@@ -123,10 +151,11 @@ export interface Empleado {
   cargo: string
   plantaId: string
   salarioBase: number
+  tipoContrato?: 'hora' | 'fijo'
   activo: boolean
 }
 
-export type TipoTurno = 'diurno' | 'nocturno'
+export type TipoTurno = 'diurno' | 'tarde' | 'nocturno'
 export interface Turno {
   id: string
   empleadoId: string
