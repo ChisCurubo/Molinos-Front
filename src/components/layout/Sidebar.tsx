@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import {
-  ArrowDownCircle, BarChart3, Boxes, CalendarDays, ClipboardList, Coins, Droplets, Factory,
+  ArrowDownCircle, BarChart3, Banknote, Boxes, CalendarDays, ClipboardList, Cloud, Coins, Container, Droplets, Factory,
   FlaskConical, HandCoins, Home, Landmark, Layers, Mountain, Package, PackagePlus, Send,
   Truck, UserCog, Users2, Wallet, type LucideIcon,
 } from 'lucide-react'
@@ -31,9 +31,21 @@ const GROUPS: NavGroup[] = [
       { to: '/materiales/inventario',       label: 'Inventario',             icon: Package      },
       { to: '/materiales/viajes-material',  label: 'Viajes material',        icon: Send         },
       { to: '/materiales/viajes',           label: 'Viajes de agua',         icon: Droplets     },
-      { to: '/materiales/zonas',       label: 'Catálogos y precios',     icon: Mountain },
-      { to: '/materiales/volquetas',   label: 'Volquetas',               icon: Truck },
-      { to: '/materiales/informes',    label: 'Informes de material',    icon: BarChart3 },
+      { to: '/materiales/mulas',            label: 'Mulas',                  icon: Container    },
+      { to: '/materiales/pago-material',    label: 'Pago de material',       icon: Banknote     },
+      { to: '/materiales/zonas',            label: 'Catálogos y precios',    icon: Mountain     },
+      { to: '/materiales/volquetas',        label: 'Volquetas',              icon: Truck        },
+      { to: '/materiales/informes',         label: 'Informes de material',   icon: BarChart3    },
+    ],
+  },
+  {
+    module: 'materiales',
+    label: 'Materiales · API',
+    icon: Cloud,
+    items: [
+      { to: '/materiales/entradas-api',  label: 'Entradas de material',   icon: PackagePlus  },
+      { to: '/materiales/analisis-api',  label: 'Análisis y laboratorio', icon: FlaskConical },
+      { to: '/materiales/catalogos-api', label: 'Catálogos y precios',    icon: Mountain     },
     ],
   },
   {
@@ -98,7 +110,7 @@ export function Sidebar({ open, onNavigate }: SidebarProps) {
       {leaf({ to: '/', label: isAdmin ? 'Panel de administración' : 'Panel principal', icon: Home })}
 
       {GROUPS.filter((g) => canView(user.role, g.module)).map((g) => (
-        <div key={g.module}>
+        <div key={g.label}>
           <div className="sidebar__group-label">
             <g.icon size={16} aria-hidden="true" />
             {g.label}

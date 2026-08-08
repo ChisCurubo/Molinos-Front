@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ArrowRight, BarChart3, Boxes, CalendarDays, ClipboardList, Coins, DollarSign, Factory,
-  FlaskConical, HandCoins, Landmark, Layers, Mountain, Package, PackagePlus, Pencil, Plus,
-  Scale, Send, Droplets, Trash2, Truck, Users2, Wallet, type LucideIcon,
+  ArrowRight, BarChart3, Boxes, CalendarDays, ClipboardList, Coins, CreditCard, DollarSign,
+  Factory, FileBarChart2, FlaskConical, HandCoins, Landmark, Layers, Mountain, Package,
+  PackagePlus, Pencil, Plus, Scale, Send, Droplets, Trash2, Truck, UserCog, Users2, Wallet,
+  type LucideIcon,
 } from 'lucide-react'
 import { Button, Card, Input, KpiTile, Modal, Select } from '@/components/ui'
 import { useData } from '@/context/DataContext'
@@ -25,6 +26,7 @@ interface QuickLink { to: string; title: string; icon: LucideIcon; variant: '' |
 interface Area { label: string; icon: LucideIcon; links: QuickLink[] }
 const AREAS: Area[] = [
   { label:'Materiales', icon:Boxes, links:[
+    { to:'/materiales',             title:'Panel de materiales',    icon:Boxes,        variant:''        },
     { to:'/materiales/entradas',        title:'Entradas de material',   icon:PackagePlus,  variant:'brown'   },
     { to:'/materiales/analisis',        title:'Análisis y laboratorio', icon:FlaskConical, variant:'emerald' },
     { to:'/materiales/procesamiento',   title:'Procesamiento',          icon:Layers,       variant:'info'    },
@@ -36,9 +38,10 @@ const AREAS: Area[] = [
     { to:'/materiales/informes',        title:'Informes de material',   icon:BarChart3,    variant:'info'    },
   ]},
   { label:'Pagos y finanzas', icon:Coins, links:[
-    { to:'/finanzas',           title:'Cuentas por pagar/cobrar', icon:Wallet,    variant:''        },
-    { to:'/finanzas/prestamos', title:'Préstamos financieros',    icon:Landmark,  variant:'brown'   },
-    { to:'/finanzas/informes',  title:'Informes de finanzas',     icon:BarChart3, variant:'info'    },
+    { to:'/finanzas',           title:'Cuentas por pagar',     icon:Wallet,      variant:''        },
+    { to:'/finanzas/cobrar',    title:'Cuentas por cobrar',    icon:CreditCard,  variant:'emerald' },
+    { to:'/finanzas/prestamos', title:'Préstamos financieros', icon:Landmark,    variant:'brown'   },
+    { to:'/finanzas/informes',  title:'Informes de finanzas',  icon:BarChart3,   variant:'info'    },
   ]},
   { label:'Nómina', icon:Users2, links:[
     { to:'/nomina',            title:'Empleados y préstamos',  icon:HandCoins,    variant:''        },
@@ -47,6 +50,11 @@ const AREAS: Area[] = [
   ]},
   { label:'Planta y producción', icon:Factory, links:[
     { to:'/planta/calendario', title:'Calendario de planta',   icon:ClipboardList, variant:'brown'  },
+  ]},
+  { label:'Administración', icon:UserCog, links:[
+    { to:'/usuarios',           title:'Gestión de usuarios',    icon:UserCog,       variant:'emerald' },
+    { to:'/informes',           title:'Power BI',               icon:BarChart3,     variant:'info'    },
+    { to:'/powerbi/generador',  title:'Generador de informes',  icon:FileBarChart2, variant:''        },
   ]},
 ]
 

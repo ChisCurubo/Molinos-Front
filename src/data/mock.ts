@@ -54,6 +54,8 @@ export interface AnalisisRow {
   id: number
   id_entrada: number | null
   id_material_concentrado: number | null
+  tipo?: 'cabeza' | 'sulfuros' | 'colas'
+  laboratorio?: 'sgs_medellin' | 'ahk_peru'
   numero_analisis: string
   ton: number | null
   porcentaje_humedad: number
@@ -129,6 +131,8 @@ export interface MaterialRow {
   total_material_seco: number
   estado: 'incluida_viaje' | 'pagada' | 'pendiente' | 'en_proceso'
   lote: string | null
+  valor_flete?: number  // peso × tarifaZona, calculado al registrar
+  acpm?: number         // adelanto de ACPM entregado (COP)
 }
 
 export interface LoteRow {
@@ -293,6 +297,16 @@ export const MINA_A_MINERO: Record<string, number> = {
 // MATERIALES
 // ===================================================
 export const materialesMock: MaterialRow[] = [
+  // ── Ejemplos con tracking de pagos (id_dueno, valor_flete, acpm) ──
+  // ANIBAL (id=1): 2 viajes Mina 30 @ $100k/ton → total $2,381,000 | abono $800k → debe $1,581,000
+  { id:9001, numero_volqueta:9001, mina:'NAUM', id_zona:1, id_dueno:1, fecha:'2026-06-15', peso_llegada_planta:11.31, porcentaje_humedad:0, tenor:0, total_material_seco:11.31, estado:'pendiente', lote:null, valor_flete:1131000 },
+  { id:9002, numero_volqueta:9002, mina:'NAUM', id_zona:1, id_dueno:1, fecha:'2026-06-22', peso_llegada_planta:12.50, porcentaje_humedad:0, tenor:0, total_material_seco:12.50, estado:'pendiente', lote:null, valor_flete:1250000, acpm:150000 },
+  // DEIMER (id=4): 2 viajes Mina 80 @ $110k/ton → total $2,442,000 | abono $3M → pagó de más, nos debe $558k
+  { id:9003, numero_volqueta:9003, mina:'OMAR M80', id_zona:3, id_dueno:4, fecha:'2026-06-18', peso_llegada_planta:10.70, porcentaje_humedad:0, tenor:0, total_material_seco:10.70, estado:'pendiente', lote:null, valor_flete:1177000 },
+  { id:9004, numero_volqueta:9004, mina:'OMAR M80', id_zona:3, id_dueno:4, fecha:'2026-06-25', peso_llegada_planta:11.50, porcentaje_humedad:0, tenor:0, total_material_seco:11.50, estado:'pendiente', lote:null, valor_flete:1265000 },
+  // CAMILO (id=6): 1 viaje Mina 30 → $2,510,000 | sin abono → debe $2,510,000
+  { id:9005, numero_volqueta:9005, mina:'NAUM', id_zona:1, id_dueno:6, fecha:'2026-06-28', peso_llegada_planta:25.10, porcentaje_humedad:0, tenor:0, total_material_seco:25.10, estado:'pendiente', lote:null, valor_flete:2510000, acpm:200000 },
+
   // Viaje 13-1: Jeferson, Abraham, Antonio, Naum, Omar Mina30
   { id:101, numero_volqueta:13006, mina:'JEFERSON', fecha:'2025-10-30', peso_llegada_planta:10.850, porcentaje_humedad:0.110, tenor:7.5, total_material_seco:9.6565,  estado:'incluida_viaje', lote:'LC-13-1-G' },
   { id:102, numero_volqueta:13007, mina:'JEFERSON', fecha:'2025-11-01', peso_llegada_planta:10.290, porcentaje_humedad:0.046, tenor:7.5, total_material_seco:9.8167,  estado:'incluida_viaje', lote:'LC-13-1-G' },

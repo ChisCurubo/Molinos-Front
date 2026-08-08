@@ -46,6 +46,24 @@ export function ViajesMaterialPage() {
   // Edit
   const [editViaje,  setEditViaje] = useState<ViajeRow | null>(null)
   const [formEdit,   setFormEdit]  = useState({ fecha: '' })
+  const [formEditLineas, setFormEditLineas] = useState<Array<{
+    id: number; lote: string; concepto: string
+    humedo_s: string; maquila_s: string; valor_s: string
+  }>>([])
+
+  const abrirEdit = (v: ViajeRow) => {
+    setEditViaje(v)
+    setFormEdit({ fecha: v.fecha })
+    setFormEditLineas(v.lineas.map(l => ({
+      id: l.id, lote: l.lote, concepto: l.concepto,
+      humedo_s: String(l.concentrado_humedo),
+      maquila_s: String(l.costo_maquila),
+      valor_s: String(l.valor_total),
+    })))
+  }
+
+  const updEditLinea = (idx: number, field: 'humedo_s' | 'maquila_s' | 'valor_s' | 'concepto', val: string) =>
+    setFormEditLineas(prev => prev.map((fl, i) => i === idx ? { ...fl, [field]: val } : fl))
 
   // Delete confirm
   const [delViaje,   setDelViaje]  = useState<ViajeRow | null>(null)
@@ -114,7 +132,32 @@ export function ViajesMaterialPage() {
 
   const guardarEdit = () => {
     if (!editViaje) return
-    setViajes(prev => prev.map(v => v.id === editViaje.id ? { ...v, fecha: formEdit.fecha } : v))
+    // Restore old disponibles, then apply new
+    setLotes(prev => prev.map(l => {
+      const oldLn = editViaje.lineas.find(ln => ln.lote === l.codigo)
+      const newLn = formEditLineas.find(fl => fl.lote === l.codigo)
+      if (!oldLn || !newLn) return l
+      const delta = oldLn.concentrado_humedo - (Number(newLn.humedo_s) || 0)
+      const newDisp = Math.max(0, l.toneladas_disponibles + delta)
+      const newEstado: LoteConcentrado['estado'] = newDisp <= 0 ? 'enviado_completo' : 'parcialmente_enviado'
+      return { ...l, toneladas_disponibles: newDisp, estado: newEstado }
+    }))
+    const newLineas: LineaViaje[] = formEditLineas.map(fl => {
+      const hum = lotes.find(l => l.codigo === fl.lote)?.porcentaje_humedad ?? 0.13
+      const humQty = Number(fl.humedo_s) || 0
+      return {
+        id: fl.id, concepto: fl.concepto, lote: fl.lote,
+        concentrado_humedo: humQty,
+        concentrado_seco: humQty * (1 - hum),
+        costo_maquila: Number(fl.maquila_s) || 0,
+        valor_total: Number(fl.valor_s) || 0,
+      }
+    })
+    setViajes(prev => prev.map(v => v.id === editViaje.id ? {
+      ...v, fecha: formEdit.fecha, lineas: newLineas,
+      maquila: newLineas.reduce((s, l) => s + l.costo_maquila, 0),
+      total_costo_material: newLineas.reduce((s, l) => s + l.valor_total, 0),
+    } : v))
     setEditViaje(null)
   }
 
@@ -314,7 +357,7 @@ export function ViajesMaterialPage() {
                           <td onClick={e => e.stopPropagation()}>
                             <div className="row" style={{ gap: 4 }}>
                               <Button variant="secondary" size="sm" icon={<Pencil size={13}/>}
-                                onClick={() => { setEditViaje(v); setFormEdit({ fecha: v.fecha }) }} />
+                                onClick={() => abrirEdit(v)} />
                               <Button variant="ghost" size="sm" icon={<Trash2 size={13}/>}
                                 onClick={() => setDelViaje(v)} />
                             </div>
@@ -470,17 +513,74 @@ export function ViajesMaterialPage() {
       {/* ── Modal: Editar viaje ── */}
       <Modal open={!!editViaje} title={`Editar viaje — ${editViaje?.numero_viaje ?? ''}`}
         onClose={() => setEditViaje(null)}
-        footer={<><Button variant="secondary" onClick={() => setEditViaje(null)}>Cancelar</Button><Button onClick={guardarEdit}>Guardar</Button></>}>
+        footer={<><Button variant="secondary" onClick={() => setEditViaje(null)}>Cancelar</Button><Button onClick={guardarEdit}>Guardar cambios</Button></>}>
         {editViaje && (
-          <div className="grid grid--form">
-            <Input label="Fecha" type="date" value={formEdit.fecha} onChange={e => setFormEdit(f => ({...f, fecha: e.target.value}))} />
-            <div className="callout" style={{ gridColumn: '1/-1' }}>
-              <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
-                Para modificar lotes o cantidades, elimina el viaje y créalo de nuevo.
-                Eliminar el viaje restaura automáticamente las toneladas disponibles en cada lote.
-              </p>
+          <>
+            <div className="grid grid--form" style={{ marginBottom: '1rem' }}>
+              <Input label="Fecha" type="date" value={formEdit.fecha} onChange={e => setFormEdit(f => ({...f, fecha: e.target.value}))} />
             </div>
-          </div>
+
+            <p style={{ fontWeight: 600, fontSize: 'var(--fs-sm)', marginBottom: '0.5rem' }}>Líneas del viaje:</p>
+            <div className="table-wrap">
+              <table className="data-table" style={{ fontSize: 'var(--fs-sm)' }}>
+                <thead>
+                  <tr>
+                    <th>Lote</th>
+                    <th>Concepto</th>
+                    <th style={{ textAlign: 'right' }}>T. Húm.</th>
+                    <th style={{ textAlign: 'right' }}>Maquila ($)</th>
+                    <th style={{ textAlign: 'right' }}>Valor mat. ($)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {formEditLineas.map((fl, i) => {
+                    const lote = lotes.find(l => l.codigo === fl.lote)
+                    const origHum = editViaje.lineas[i]?.concentrado_humedo ?? 0
+                    const dispTotal = (lote?.toneladas_disponibles ?? 0) + origHum
+                    const inp = (val: string, field: 'humedo_s' | 'maquila_s' | 'valor_s', w = '6rem') => (
+                      <input type="number" step="0.01"
+                        style={{ fontSize: 'var(--fs-sm)', padding: '0.2rem 0.4rem', border: '1px solid var(--border)', borderRadius: 4, textAlign: 'right', width: w }}
+                        value={val} onChange={e => updEditLinea(i, field, e.target.value)} />
+                    )
+                    return (
+                      <tr key={fl.id}>
+                        <td style={{ fontWeight: 700 }} className="mono">{fl.lote}</td>
+                        <td>
+                          <input type="text"
+                            style={{ fontSize: 'var(--fs-sm)', padding: '0.2rem 0.4rem', border: '1px solid var(--border)', borderRadius: 4, width: '100%', minWidth: '8rem' }}
+                            value={fl.concepto} onChange={e => updEditLinea(i, 'concepto', e.target.value)} />
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                            {inp(fl.humedo_s, 'humedo_s')}
+                            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+                              Disp: {dispTotal.toFixed(2)} t
+                            </span>
+                          </div>
+                        </td>
+                        <td>{inp(fl.maquila_s, 'maquila_s', '7rem')}</td>
+                        <td>{inp(fl.valor_s, 'valor_s', '7rem')}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ fontWeight: 700 }}>
+                    <td colSpan={2}>Total</td>
+                    <td style={{ textAlign: 'right' }} className="mono">
+                      {formEditLineas.reduce((s, fl) => s + (Number(fl.humedo_s) || 0), 0).toFixed(2)} t
+                    </td>
+                    <td style={{ textAlign: 'right' }} className="mono">
+                      {cop(formEditLineas.reduce((s, fl) => s + (Number(fl.maquila_s) || 0), 0))}
+                    </td>
+                    <td style={{ textAlign: 'right' }} className="mono">
+                      {cop(formEditLineas.reduce((s, fl) => s + (Number(fl.valor_s) || 0), 0))}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </>
         )}
       </Modal>
 

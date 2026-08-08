@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { User } from '@/types'
+import type { Role, User } from '@/types'
 import { seedUsers } from '@/data/seed'
+import { authApi } from '@/api/auth'
 
 interface StoredUser extends User {
   password: string
@@ -39,6 +40,14 @@ function fakeJwt(user: User): string {
   return `${header}.${payload}.molinos-signature`
 }
 
+// Mapea el rol devuelto por el backend a los roles de la app. Si no coincide,
+// usa el rol conocido por email (seedUsers) y por defecto 'administrador'.
+function resolveRole(apiRol: string | undefined, fallback: Role | undefined): Role {
+  const r = apiRol?.toLowerCase().trim()
+  if (r === 'administrador' || r === 'materiales' || r === 'financiero') return r
+  return fallback ?? 'administrador'
+}
+
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -59,8 +68,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [users])
 
   useEffect(() => {
-    if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session))
-    else localStorage.removeItem(SESSION_KEY)
+    if (session) {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(session))
+      // El cliente API (client.ts) lee el token desde localStorage['token'].
+      localStorage.setItem('token', session.token)
+    } else {
+      localStorage.removeItem(SESSION_KEY)
+      localStorage.removeItem('token')
+    }
   }, [session])
 
   const publicUsers = useMemo<User[]>(
@@ -68,10 +83,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [users],
   )
 
+  // Login contra el backend real (POST /auth/login). Si el backend no responde,
+  // cae a la autenticación mock local (seedUsers) para no bloquear el prototipo.
   const login = useCallback<AuthContextValue['login']>(
     async (email, password) => {
-      await new Promise((r) => setTimeout(r, 350))
-      const found = users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase())
+      const correo = email.trim().toLowerCase()
+
+      // 1) Intento real: guarda el token del backend para las llamadas a la API.
+      try {
+        const resp = await authApi.login(correo, password)
+        if (resp?.token) {
+          const seed = users.find((u) => u.email.toLowerCase() === correo)
+          const role = resolveRole(resp.user?.rol, seed?.role)
+          const user: User = {
+            id: resp.user?.id != null ? String(resp.user.id) : (seed?.id ?? correo),
+            nombre: resp.user?.nombres ?? seed?.nombre ?? correo,
+            email: resp.user?.correo ?? correo,
+            role,
+            activo: true,
+            ultimoAcceso: new Date().toISOString().slice(0, 10),
+          }
+          setSession({ user, token: resp.token })
+          return { ok: true }
+        }
+      } catch {
+        // Backend no disponible o credenciales rechazadas → intentar mock abajo.
+      }
+
+      // 2) Fallback mock local.
+      const found = users.find((u) => u.email.toLowerCase() === correo)
       if (!found) return { ok: false, error: 'No existe una cuenta con ese correo.' }
       if (!found.activo) return { ok: false, error: 'La cuenta está desactivada. Contacte al administrador.' }
       if (found.password !== password) return { ok: false, error: 'La contraseña es incorrecta.' }

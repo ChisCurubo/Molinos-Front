@@ -10,10 +10,21 @@ Base URL: `http://localhost:3005/api/v1` (configurada en `.env.local`)
 | `src/api/withFallback.ts` | ✅ | Envuelve client.ts con fallback a mock en caso de error |
 | `src/api/catalogos.ts` | ✅ | Cache de `/info/catalogos` (minas, mineros, zonas, dueños) |
 | `src/api/auth.ts` | ✅ | Login, verify, CRUD usuarios |
-| `src/api/material.ts` | ✅ | Entradas, análisis, concentrado, viajes, volquetas, dueños, agua, minas, mineros, zonas |
+| `src/api/material.ts` | ✅ | **Reescrito y tipado por endpoint** (spec backend): zonas, mineros, minas, dueños, volquetas, precios, entradas, análisis. Helpers `num()`/`numOrNull()` para decimales-string |
+| `src/hooks/useMaterialCatalogos.ts` | ✅ | Hooks de catálogo con caché compartida + `invalidateMaterialCatalog()` |
+| `src/components/common/CatalogSelectors.tsx` | ✅ | Selectores reutilizables (mina, minero, zona, volqueta, dueño) |
 | `src/api/nomina.ts` | ✅ | Empleados, préstamos empleado, turnos, plantas, vistas saldo |
 | `src/api/pagos.ts` | ✅ | CxP, CxC categorías, préstamos financieros, proveedores, gastos, alquileres |
 | `.env.local` | ✅ | `VITE_API_URL=http://localhost:3005/api/v1` |
+
+## Páginas nuevas conectadas 100% a la API (en paralelo a las mock)
+
+| Ruta | Página | Cubre |
+|---|---|---|
+| `/materiales/zonas` | `CatalogosPage` (reescrita) | Zonas, Mineros, Minas, Dueños, Volquetas, Precios — CRUD + 409 |
+| `/materiales/entradas-api` | `EntradasApiPage` (nueva) | Registrar llegada, tabla + paginación, detalle expandible, análisis de cabeza (crear/ver/editar/borrar) |
+
+> Las páginas mock originales (`EntradasPage`, `VolquetasPage`, `AnalisisPage`) siguen intactas.
 
 ## Endpoints del backend conectados a la UI
 

@@ -66,3 +66,8 @@ storybook-static/
 
 # ── Graphify (knowledge graph local, no versionar) ────────
 graphify-out/
+
+# ── Playwright ────────────────────────────────────────────
+playwright-report/
+test-results/
+

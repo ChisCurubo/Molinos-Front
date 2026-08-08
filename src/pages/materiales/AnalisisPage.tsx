@@ -15,12 +15,19 @@ const ESTADO_PAGO_OPTS = [
 
 type NuevoTab = 'sin_analisis' | 'cabeza' | 'concentrado'
 type TipoBusqueda = 'mina' | 'volqueta' | 'id'
+type TipoTab = 'todos' | 'cabeza' | 'sulfuros' | 'colas' | 'concentrado'
+
+function fmtDMY(iso: string | null | undefined) {
+  if (!iso) return '—'
+  const [y, m, d] = iso.split('-')
+  return `${d}/${m}/${y}`
+}
 
 export function AnalisisPage() {
   const canWrite = useCanWrite('materiales')
   const { analisis, setAnalisis, materiales: materialesList, setMateriales, lotes: lotesConc } = useMateriales()
   const [busqueda,    setBusqueda]    = useState('')
-  const [tipoFiltro, setTipoFiltro]  = useState<'todos' | 'entrada' | 'concentrado'>('todos')
+  const [tipoFiltro, setTipoFiltro]  = useState<TipoTab>('todos')
 
   // ── Modal editar ────────────────────────────────────────
   const [editA, setEditA] = useState<AnalisisRow | null>(null)
@@ -69,8 +76,8 @@ export function AnalisisPage() {
       estado_pago:        fp.estado_pago,
     }))
 
-    // Sync analysis results back to material so EntradasPage shows updated values
-    if (editA.id_entrada != null) {
+    // Sync back to MaterialRow — only for cabeza analyses (sulfuros/colas have different semantics)
+    if (editA.id_entrada != null && (editA.tipo == null || editA.tipo === 'cabeza')) {
       const auFalso = Number(fp.au_falso) || 0
       setMateriales(prev => prev.map(m => m.id === editA.id_entrada ? {
         ...m,
@@ -104,9 +111,9 @@ export function AnalisisPage() {
     estado_pago: 'no_aplica' as 'no_aplica' | 'pendiente' | 'pagado',
   })
 
-  // Materiales sin análisis de planta (cabeza)
+  // Materiales sin análisis de cabeza
   const sinAnalisis = useMemo(() =>
-    materialesList.filter(m => !analisis.some(a => a.id_entrada === m.id))
+    materialesList.filter(m => !analisis.some(a => a.id_entrada === m.id && (a.tipo == null || a.tipo === 'cabeza')))
       .sort((a, b) => b.fecha.localeCompare(a.fecha)),
     [materialesList, analisis]
   )
@@ -231,8 +238,10 @@ export function AnalisisPage() {
 
   // ── Filtros y KPIs ──────────────────────────────────────
   const filtrados = analisis.filter(a => {
-    if (tipoFiltro === 'entrada'     && a.id_entrada == null)              return false
     if (tipoFiltro === 'concentrado' && a.id_material_concentrado == null) return false
+    if (tipoFiltro === 'cabeza'      && !(a.id_entrada != null && (a.tipo == null || a.tipo === 'cabeza'))) return false
+    if (tipoFiltro === 'sulfuros'    && a.tipo !== 'sulfuros')             return false
+    if (tipoFiltro === 'colas'       && a.tipo !== 'colas')                return false
     if (busqueda) {
       const q = busqueda.toUpperCase()
       if (!a.numero_analisis.toUpperCase().includes(q) && !(a.comentarios?.toUpperCase().includes(q))) return false
@@ -273,12 +282,26 @@ export function AnalisisPage() {
           <input className="field__input" placeholder="Buscar por N.° análisis o comentario…"
             value={busqueda} onChange={e => setBusqueda(e.target.value)} style={{ maxWidth: '20rem' }} />
           <div className="segment">
-            {([['todos', 'Todos'], ['entrada', 'Planta/Entrada'], ['concentrado', 'Concentrado']] as const).map(([k, l]) => (
-              <button key={k}
-                className={`segment__btn ${tipoFiltro === k ? 'segment__btn--active' : ''}`}
-                onClick={() => setTipoFiltro(k)}>{l}
-              </button>
-            ))}
+            {([
+              ['todos',        'Todos'],
+              ['cabeza',       'Cabeza'],
+              ['sulfuros',     'Sulfuros'],
+              ['colas',        'Colas'],
+              ['concentrado',  'Concentrado'],
+            ] as [TipoTab, string][]).map(([k, l]) => {
+              const cnt = k === 'todos' ? analisis.length
+                : k === 'concentrado'  ? analisis.filter(a => a.id_material_concentrado != null).length
+                : k === 'cabeza'       ? analisis.filter(a => a.id_entrada != null && (a.tipo == null || a.tipo === 'cabeza')).length
+                :                        analisis.filter(a => a.tipo === k).length
+              return (
+                <button key={k}
+                  className={`segment__btn ${tipoFiltro === k ? 'segment__btn--active' : ''}`}
+                  onClick={() => setTipoFiltro(k)}>
+                  {l}
+                  {cnt > 0 && <span style={{ marginLeft: 4, fontSize: 'var(--fs-xs)', opacity: 0.75 }}>({cnt})</span>}
+                </button>
+              )
+            })}
           </div>
         </div>
 
@@ -286,44 +309,59 @@ export function AnalisisPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>N.° Análisis</th><th>Tipo</th>
+                <th>Tipo / Referencia</th>
+                <th>N.° Análisis</th>
                 <th style={{ textAlign: 'right' }}>T. Húm.</th>
-                <th style={{ textAlign: 'right' }}>Hum. %</th>
-                <th style={{ textAlign: 'right' }}>T. Seco</th>
+                <th style={{ textAlign: 'right' }}>Seco (t)</th>
                 <th style={{ textAlign: 'right' }}>Au conc. (g)</th>
                 <th style={{ textAlign: 'right' }}>Ag conc. (g)</th>
                 <th style={{ textAlign: 'right' }}>Au gr/t</th>
                 <th style={{ textAlign: 'right' }}>Ag gr/t</th>
-                <th>Fecha sal.</th><th>Estado pago</th><th>Comentarios</th>
+                <th>Fecha salida</th>
+                <th>Estado pago</th>
+                <th style={{ maxWidth: '10rem' }}>Comentarios</th>
                 {canWrite && <th></th>}
               </tr>
             </thead>
             <tbody>
               {filtrados.length === 0 ? (
-                <tr><td colSpan={canWrite ? 13 : 12} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Sin registros</td></tr>
+                <tr><td colSpan={canWrite ? 12 : 11} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Sin registros</td></tr>
               ) : filtrados.map(a => {
                 const matRef  = a.id_entrada != null ? materialesList.find(m => m.id === a.id_entrada) : null
                 const loteRef = a.id_material_concentrado != null ? lotesConc.find(l => l.id === a.id_material_concentrado) : null
+                const tipoBadge = a.id_material_concentrado != null
+                  ? { label: 'Concentrado', style: { background: '#d1fae5', color: '#065f46' } }
+                  : a.tipo === 'sulfuros'
+                  ? { label: 'Sulfuros',    style: { background: '#d1fae5', color: '#065f46' } }
+                  : a.tipo === 'colas'
+                  ? { label: 'Colas',       style: { background: '#ffe4e6', color: '#9f1239' } }
+                  : { label: 'Cabeza',      style: { background: '#e0f2fe', color: '#0c4a6e' } }
+                const ref = loteRef?.codigo ?? (matRef ? `${matRef.mina} #${matRef.numero_volqueta}` : null)
                 return (
                   <tr key={a.id}>
-                    <td style={{ fontWeight: 700 }} className="mono">{a.numero_analisis}</td>
                     <td>
-                      {a.id_material_concentrado != null
-                        ? <><span className="badge badge--success">Concentrado</span>{loteRef && <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginLeft: 4 }}>{loteRef.codigo}</span>}</>
-                        : <><span className="badge badge--info">Planta</span>{matRef && <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginLeft: 4 }}>{matRef.mina}</span>}</>}
+                      <span className="badge" style={{ ...tipoBadge.style, fontWeight: 700 }}>{tipoBadge.label}</span>
+                      {ref && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: 2 }}>{ref}</div>}
+                      {matRef && <div style={{ fontSize: '0.6rem', color: 'var(--text-faint)' }}>{fmtDMY(matRef.fecha)}</div>}
                     </td>
-                    <td style={{ textAlign: 'right' }} className="mono">{a.toneladas_humedas?.toFixed(3) ?? a.ton?.toFixed(3) ?? '—'}</td>
-                    <td style={{ textAlign: 'right' }} className="mono">{(a.porcentaje_humedad * 100).toFixed(1)}%</td>
-                    <td style={{ textAlign: 'right' }} className="mono">{a.toneladas_secas?.toFixed(4) ?? '—'}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">
+                    <td style={{ fontWeight: 700 }} className="mono">{a.numero_analisis}</td>
+                    <td style={{ textAlign: 'right' }} className="mono">
+                      {(a.toneladas_humedas ?? a.ton) != null
+                        ? <>{(a.toneladas_humedas ?? a.ton)!.toFixed(3)}<div style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>{(a.porcentaje_humedad * 100).toFixed(1)}% hum.</div></>
+                        : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }} className="mono">{a.toneladas_secas?.toFixed(4) ?? '—'}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--amber-800)' }} className="mono">
                       {a.au_concentrado != null ? a.au_concentrado.toFixed(2) : '—'}
                     </td>
                     <td style={{ textAlign: 'right' }} className="mono">
                       {a.ag_concentrado != null ? a.ag_concentrado.toFixed(1) : '—'}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--amber-700)' }} className="mono">{a.au_gr_x_ton.toFixed(1)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--amber-700)' }} className="mono">{a.au_gr_x_ton.toFixed(1)}</td>
                     <td style={{ textAlign: 'right' }} className="mono">{a.ag_gr_x_ton?.toFixed(0) ?? '—'}</td>
-                    <td style={{ fontSize: 'var(--fs-sm)' }}>{a.fecha_salida ? formatDate(a.fecha_salida) : '—'}</td>
+                    <td style={{ fontSize: 'var(--fs-sm)', whiteSpace: 'nowrap', fontWeight: a.fecha_salida ? 600 : 400, color: a.fecha_salida ? 'var(--text)' : 'var(--text-faint)' }}>
+                      {fmtDMY(a.fecha_salida)}
+                    </td>
                     <td>
                       <span className={`badge badge--${a.estado_pago === 'pagado' ? 'success' : a.estado_pago === 'pendiente' ? 'warning' : 'neutral'}`}>
                         {a.estado_pago === 'pagado' ? 'Pagado' : a.estado_pago === 'pendiente' ? 'Pendiente' : 'N/A'}
@@ -347,8 +385,8 @@ export function AnalisisPage() {
             <tfoot>
               <tr style={{ fontWeight: 700 }}>
                 <td colSpan={2}>Total ({filtrados.length})</td>
-                <td style={{ textAlign: 'right' }} className="mono">{totalTon.toFixed(2)}</td>
-                <td colSpan={canWrite ? 10 : 9} />
+                <td style={{ textAlign: 'right' }} className="mono">{totalTon.toFixed(2)} t</td>
+                <td colSpan={canWrite ? 9 : 8} />
               </tr>
             </tfoot>
           </table>
