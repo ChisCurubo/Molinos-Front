@@ -13,15 +13,20 @@ import { MaterialesDashboard } from '@/pages/materiales/MaterialesDashboard'
 import { VolquetasPage } from '@/pages/materiales/VolquetasPage'
 import { CatalogosPage } from '@/pages/materiales/CatalogosPage'
 import { CatalogosApiPage } from '@/pages/materiales/CatalogosApiPage'
+import { VolquetasApiPage } from '@/pages/materiales/VolquetasApiPage'
 import { EntradasPage } from '@/pages/materiales/EntradasPage'
 import { EntradasApiPage } from '@/pages/materiales/EntradasApiPage'
 import { AnalisisApiPage } from '@/pages/materiales/AnalisisApiPage'
 import { AnalisisPage } from '@/pages/materiales/AnalisisPage'
 import { ViajesAguaPage } from '@/pages/materiales/ViajesAguaPage'
+import { ViajesAguaApiPage } from '@/pages/materiales/ViajesAguaApiPage'
 import { InformesMaterialPage } from '@/pages/materiales/InformesMaterialPage'
 import { ProcesamientoPage } from '@/pages/materiales/ProcesamientoPage'
+import { ProcesamientoApiPage } from '@/pages/materiales/ProcesamientoApiPage'
 import { InventarioPage } from '@/pages/materiales/InventarioPage'
+import { InventarioApiPage } from '@/pages/materiales/InventarioApiPage'
 import { ViajesMaterialPage } from '@/pages/materiales/ViajesMaterialPage'
+import { ViajesMaterialApiPage } from '@/pages/materiales/ViajesMaterialApiPage'
 import { MulasPage } from '@/pages/materiales/MulasPage'
 import { PagoMaterialPage } from '@/pages/materiales/PagoMaterialPage'
 import { FinanzasPage } from '@/pages/finanzas/FinanzasPage'
@@ -60,6 +65,7 @@ function AppRoutes() {
         <Route path="/materiales/volquetas" element={<ProtectedRoute module="materiales"><VolquetasPage /></ProtectedRoute>} />
         <Route path="/materiales/zonas" element={<ProtectedRoute module="materiales"><CatalogosPage /></ProtectedRoute>} />
         <Route path="/materiales/catalogos-api" element={<ProtectedRoute module="materiales"><CatalogosApiPage /></ProtectedRoute>} />
+        <Route path="/materiales/volquetas-api" element={<ProtectedRoute module="materiales"><VolquetasApiPage /></ProtectedRoute>} />
         <Route path="/materiales/entradas" element={<ProtectedRoute module="materiales"><EntradasPage /></ProtectedRoute>} />
         <Route path="/materiales/entradas-api" element={<ProtectedRoute module="materiales"><EntradasApiPage /></ProtectedRoute>} />
         <Route path="/materiales/analisis-api" element={<ProtectedRoute module="materiales"><AnalisisApiPage /></ProtectedRoute>} />
@@ -69,6 +75,10 @@ function AppRoutes() {
         <Route path="/materiales/inventario"     element={<ProtectedRoute module="materiales"><InventarioPage /></ProtectedRoute>} />
         <Route path="/materiales/viajes-material" element={<ProtectedRoute module="materiales"><ViajesMaterialPage /></ProtectedRoute>} />
         <Route path="/materiales/viajes" element={<ProtectedRoute module="materiales"><ViajesAguaPage /></ProtectedRoute>} />
+        <Route path="/materiales/viajes-agua-api" element={<ProtectedRoute module="materiales"><ViajesAguaApiPage /></ProtectedRoute>} />
+        <Route path="/materiales/procesamiento-api" element={<ProtectedRoute module="materiales"><ProcesamientoApiPage /></ProtectedRoute>} />
+        <Route path="/materiales/inventario-api" element={<ProtectedRoute module="materiales"><InventarioApiPage /></ProtectedRoute>} />
+        <Route path="/materiales/viajes-material-api" element={<ProtectedRoute module="materiales"><ViajesMaterialApiPage /></ProtectedRoute>} />
         <Route path="/materiales/mulas" element={<ProtectedRoute module="materiales"><MulasPage /></ProtectedRoute>} />
         <Route path="/materiales/pago-material" element={<ProtectedRoute module="materiales"><PagoMaterialPage /></ProtectedRoute>} />
         <Route path="/materiales/informes" element={<ProtectedRoute module="materiales"><InformesMaterialPage /></ProtectedRoute>} />

@@ -27,7 +27,7 @@ interface SelLinea {
 
 export function ViajesMaterialPage() {
   const canWrite = useCanWrite('materiales')
-  const { viajes, setViajes, lotes, setLotes, materiales } = useMateriales()
+  const { viajes, setViajes, lotes, setLotes, materiales, analisis } = useMateriales()
 
   const [pageTab,    setPageTab]   = useState<PageTab>('viajes')
   const [expanded,   setExpanded]  = useState<Set<number>>(new Set())
@@ -53,6 +53,7 @@ export function ViajesMaterialPage() {
 
   const abrirEdit = (v: ViajeRow) => {
     setEditViaje(v)
+    setAddOpen(false)
     setFormEdit({ fecha: v.fecha })
     setFormEditLineas(v.lineas.map(l => ({
       id: l.id, lote: l.lote, concepto: l.concepto,
@@ -64,6 +65,30 @@ export function ViajesMaterialPage() {
 
   const updEditLinea = (idx: number, field: 'humedo_s' | 'maquila_s' | 'valor_s' | 'concepto', val: string) =>
     setFormEditLineas(prev => prev.map((fl, i) => i === idx ? { ...fl, [field]: val } : fl))
+  const removeEditLinea = (idx: number) =>
+    setFormEditLineas(prev => prev.filter((_, i) => i !== idx))
+
+  // Agregar lotes al viaje en edición vía modal de selección (como al crear).
+  const [addOpen, setAddOpen] = useState(false)
+  const [addSel, setAddSel] = useState<{ id: number; codigo: string; disp: number; auT: number; checked: boolean; humedo_s: string }[]>([])
+  const abrirAgregarLotes = () => {
+    const disp = lotes.filter(l => l.toneladas_disponibles > 0 && !formEditLineas.some(fl => fl.lote === l.codigo))
+    setAddSel(disp.map(l => {
+      const an = analisis.find(a => a.id_material_concentrado === l.id)
+      return { id: l.id, codigo: l.codigo, disp: l.toneladas_disponibles, auT: an ? an.au_gr_x_ton : 0, checked: false, humedo_s: l.toneladas_disponibles.toFixed(2) }
+    }))
+    setAddOpen(true)
+  }
+  const updAddSel = (id: number, patch: Partial<{ checked: boolean; humedo_s: string }>) =>
+    setAddSel(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s))
+  const confirmarAgregarLotes = () => {
+    const nuevos = addSel.filter(s => s.checked).map(s => ({
+      id: Date.now() + s.id, lote: s.codigo, concepto: s.codigo,
+      humedo_s: s.humedo_s || s.disp.toFixed(2), maquila_s: '0', valor_s: '0',
+    }))
+    setFormEditLineas(prev => [...prev, ...nuevos])
+    setAddOpen(false)
+  }
 
   // Delete confirm
   const [delViaje,   setDelViaje]  = useState<ViajeRow | null>(null)
@@ -76,6 +101,21 @@ export function ViajesMaterialPage() {
   const totalMaquila  = viajes.reduce((s, v) => s + v.maquila, 0)
   const totalMaterial = viajes.reduce((s, v) => s + v.total_costo_material, 0)
   const totalTon      = viajes.reduce((s, v) => s + v.lineas.reduce((ls, l) => ls + l.concentrado_humedo, 0), 0)
+
+  // Au/Ag que lleva un viaje = ley del análisis del concentrado del lote × toneladas secas de la línea.
+  const auAgViaje = (lineas: LineaViaje[]) => {
+    let au = 0, ag = 0, seco = 0
+    for (const ln of lineas) {
+      const lote = lotes.find(l => l.codigo === ln.lote)
+      if (!lote) continue
+      const an = analisis.find(a => a.id_material_concentrado === lote.id)
+      seco += ln.concentrado_seco
+      if (an) { au += (an.au_gr_x_ton || 0) * ln.concentrado_seco; ag += (an.ag_gr_x_ton || 0) * ln.concentrado_seco }
+    }
+    return { au, ag, seco, auTenor: seco > 0 ? au / seco : 0, agTenor: seco > 0 ? ag / seco : 0 }
+  }
+  const auPromedio = viajes.length ? viajes.reduce((s, v) => s + auAgViaje(v.lineas).au, 0) / viajes.length : 0
+  const agPromedio = viajes.length ? viajes.reduce((s, v) => s + auAgViaje(v.lineas).ag, 0) / viajes.length : 0
 
   // ── Wizard ─────────────────────────────────────────────
   const abrirWizard = () => {
@@ -132,24 +172,27 @@ export function ViajesMaterialPage() {
 
   const guardarEdit = () => {
     if (!editViaje) return
-    // Restore old disponibles, then apply new
+    // Reconcilia por lote: devuelve lo que ya no se usa y descuenta lo nuevo (soporta
+    // agregar/quitar lotes). Un lote que sale del viaje vuelve a "en canoa".
     setLotes(prev => prev.map(l => {
-      const oldLn = editViaje.lineas.find(ln => ln.lote === l.codigo)
-      const newLn = formEditLineas.find(fl => fl.lote === l.codigo)
-      if (!oldLn || !newLn) return l
-      const delta = oldLn.concentrado_humedo - (Number(newLn.humedo_s) || 0)
-      const newDisp = Math.max(0, l.toneladas_disponibles + delta)
-      const newEstado: LoteConcentrado['estado'] = newDisp <= 0 ? 'enviado_completo' : 'parcialmente_enviado'
+      const oldTaken = editViaje.lineas.filter(ln => ln.lote === l.codigo).reduce((s, ln) => s + ln.concentrado_humedo, 0)
+      const newTaken = formEditLineas.filter(fl => fl.lote === l.codigo).reduce((s, fl) => s + (Number(fl.humedo_s) || 0), 0)
+      if (oldTaken === 0 && newTaken === 0) return l
+      const newDisp = Math.max(0, l.toneladas_disponibles + oldTaken - newTaken)
+      const newEstado: LoteConcentrado['estado'] =
+        newTaken === 0 ? 'en_canoa' : newDisp <= 0 ? 'enviado_completo' : 'parcialmente_enviado'
       return { ...l, toneladas_disponibles: newDisp, estado: newEstado }
     }))
     const newLineas: LineaViaje[] = formEditLineas.map(fl => {
-      const hum = lotes.find(l => l.codigo === fl.lote)?.porcentaje_humedad ?? 0.13
+      const lote = lotes.find(l => l.codigo === fl.lote)
+      const hum = lote?.porcentaje_humedad ?? 0.13
       const humQty = Number(fl.humedo_s) || 0
+      const seco = humQty * (1 - hum)
       return {
-        id: fl.id, concepto: fl.concepto, lote: fl.lote,
+        id: fl.id, concepto: fl.concepto || fl.lote, lote: fl.lote,
         concentrado_humedo: humQty,
-        concentrado_seco: humQty * (1 - hum),
-        costo_maquila: Number(fl.maquila_s) || 0,
+        concentrado_seco: seco,
+        costo_maquila: Math.round(seco * (lote?.precio_maquila_por_ton ?? 300000)), // maquila automática
         valor_total: Number(fl.valor_s) || 0,
       }
     })
@@ -158,7 +201,7 @@ export function ViajesMaterialPage() {
       maquila: newLineas.reduce((s, l) => s + l.costo_maquila, 0),
       total_costo_material: newLineas.reduce((s, l) => s + l.valor_total, 0),
     } : v))
-    setEditViaje(null)
+    setEditViaje(null); setAddOpen(false)
   }
 
   const confirmarDel = () => {
@@ -283,6 +326,8 @@ export function ViajesMaterialPage() {
         <KpiTile label="T. despachadas total" value={`${totalTon.toFixed(2)} t`} accent="emerald" />
         <KpiTile label="Total maquila"        value={cop(totalMaquila)}           accent="brown"   />
         <KpiTile label="Total material"       value={cop(totalMaterial)}          accent="amber"   />
+        <KpiTile label="Au prom/viaje"        value={`${auPromedio.toFixed(1)} g`} accent="amber"   />
+        <KpiTile label="Ag prom/viaje"        value={`${agPromedio.toFixed(0)} g`} accent="brown"   />
       </div>
 
       <div className="segment" role="tablist" style={{ marginBottom: 18 }}>
@@ -325,17 +370,20 @@ export function ViajesMaterialPage() {
                   <th style={{ textAlign: 'right' }}>T. Húm.</th>
                   <th style={{ textAlign: 'right' }}>Maquila</th>
                   <th style={{ textAlign: 'right' }}>Valor material</th>
+                  <th style={{ textAlign: 'right' }}>Au (g)</th>
+                  <th style={{ textAlign: 'right' }}>Ag (g)</th>
                   <th>Lotes</th>
                   {canWrite && <th></th>}
                 </tr>
               </thead>
               <tbody>
                 {viajesFiltrados.length === 0 && (
-                  <tr><td colSpan={canWrite ? 8 : 7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Sin registros</td></tr>
+                  <tr><td colSpan={canWrite ? 10 : 9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Sin registros</td></tr>
                 )}
                 {viajesFiltrados.map(v => {
                   const isExp  = expanded.has(v.id)
                   const totHum = v.lineas.reduce((s, l) => s + l.concentrado_humedo, 0)
+                  const aa = auAgViaje(v.lineas)
                   return (
                     <React.Fragment key={v.id}>
                       <tr style={{ cursor: 'pointer', ...(isExp ? { background: 'var(--slate-50)' } : {}) }}
@@ -350,8 +398,12 @@ export function ViajesMaterialPage() {
                         <td style={{ textAlign: 'right' }} className="mono">
                           {v.total_costo_material > 0 ? cop(v.total_costo_material) : '—'}
                         </td>
-                        <td style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
-                          {v.lineas.map(l => l.lote).join(', ')}
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--amber-700)' }} className="mono">{aa.au > 0 ? aa.au.toFixed(1) : '—'}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--text-muted)' }} className="mono">{aa.ag > 0 ? aa.ag.toFixed(0) : '—'}</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            {v.lineas.map(l => <span key={l.id} className="badge badge--neutral" style={{ fontSize: '0.6rem' }}>{l.lote}</span>)}
+                          </div>
                         </td>
                         {canWrite && (
                           <td onClick={e => e.stopPropagation()}>
@@ -367,7 +419,7 @@ export function ViajesMaterialPage() {
 
                       {isExp && (
                         <tr style={{ background: 'var(--slate-50)' }}>
-                          <td colSpan={canWrite ? 8 : 7} style={{ padding: '0.75rem 1rem 1rem 2rem' }}>
+                          <td colSpan={canWrite ? 10 : 9} style={{ padding: '0.75rem 1rem 1rem 2rem' }}>
                             <p style={{ fontWeight: 600, fontSize: 'var(--fs-sm)', marginBottom: '0.5rem' }}>
                               Líneas del viaje ({v.lineas.length}):
                             </p>
@@ -380,10 +432,17 @@ export function ViajesMaterialPage() {
                                     <th style={{ textAlign: 'right' }}>T. Seco</th>
                                     <th style={{ textAlign: 'right' }}>Maquila</th>
                                     <th style={{ textAlign: 'right' }}>Valor mat.</th>
+                                    <th style={{ textAlign: 'right' }}>Au (g)</th>
+                                    <th style={{ textAlign: 'right' }}>Ag (g)</th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {v.lineas.map(l => (
+                                  {v.lineas.map(l => {
+                                    const lote = lotes.find(x => x.codigo === l.lote)
+                                    const an = lote ? analisis.find(a => a.id_material_concentrado === lote.id) : undefined
+                                    const auL = an ? (an.au_gr_x_ton || 0) * l.concentrado_seco : 0
+                                    const agL = an ? (an.ag_gr_x_ton || 0) * l.concentrado_seco : 0
+                                    return (
                                     <tr key={l.id}>
                                       <td style={{ fontWeight: 700 }} className="mono">{l.lote}</td>
                                       <td>{l.concepto}</td>
@@ -395,8 +454,11 @@ export function ViajesMaterialPage() {
                                       <td style={{ textAlign: 'right' }} className="mono">
                                         {l.valor_total > 0 ? cop(l.valor_total) : '—'}
                                       </td>
+                                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--amber-700)' }} className="mono">{auL > 0 ? auL.toFixed(1) : '—'}</td>
+                                      <td style={{ textAlign: 'right' }} className="mono">{agL > 0 ? agL.toFixed(0) : '—'}</td>
                                     </tr>
-                                  ))}
+                                    )
+                                  })}
                                 </tbody>
                                 <tfoot>
                                   <tr>
@@ -411,6 +473,8 @@ export function ViajesMaterialPage() {
                                     <td style={{ textAlign: 'right' }} className="mono">
                                       {v.total_costo_material > 0 ? cop(v.total_costo_material) : '—'}
                                     </td>
+                                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--amber-700)' }} className="mono">{auAgViaje(v.lineas).au.toFixed(1)}</td>
+                                    <td style={{ textAlign: 'right' }} className="mono">{auAgViaje(v.lineas).ag.toFixed(0)}</td>
                                   </tr>
                                 </tfoot>
                               </table>
@@ -514,73 +578,120 @@ export function ViajesMaterialPage() {
       <Modal open={!!editViaje} title={`Editar viaje — ${editViaje?.numero_viaje ?? ''}`}
         onClose={() => setEditViaje(null)}
         footer={<><Button variant="secondary" onClick={() => setEditViaje(null)}>Cancelar</Button><Button onClick={guardarEdit}>Guardar cambios</Button></>}>
-        {editViaje && (
+        {editViaje && (() => {
+          const disponiblesAgregar = lotes.filter(l => l.toneladas_disponibles > 0 && !formEditLineas.some(fl => fl.lote === l.codigo))
+          return (
           <>
             <div className="grid grid--form" style={{ marginBottom: '1rem' }}>
               <Input label="Fecha" type="date" value={formEdit.fecha} onChange={e => setFormEdit(f => ({...f, fecha: e.target.value}))} />
             </div>
 
-            <p style={{ fontWeight: 600, fontSize: 'var(--fs-sm)', marginBottom: '0.5rem' }}>Líneas del viaje:</p>
+            <p style={{ fontWeight: 600, fontSize: 'var(--fs-sm)', marginBottom: '0.5rem' }}>Lotes del viaje</p>
             <div className="table-wrap">
               <table className="data-table" style={{ fontSize: 'var(--fs-sm)' }}>
                 <thead>
                   <tr>
                     <th>Lote</th>
-                    <th>Concepto</th>
-                    <th style={{ textAlign: 'right' }}>T. Húm.</th>
-                    <th style={{ textAlign: 'right' }}>Maquila ($)</th>
+                    <th style={{ textAlign: 'right' }}>T. Húm. tomada</th>
                     <th style={{ textAlign: 'right' }}>Valor mat. ($)</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
+                  {formEditLineas.length === 0 && (
+                    <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem' }}>Sin lotes. Agrega uno abajo.</td></tr>
+                  )}
                   {formEditLineas.map((fl, i) => {
                     const lote = lotes.find(l => l.codigo === fl.lote)
-                    const origHum = editViaje.lineas[i]?.concentrado_humedo ?? 0
+                    const origHum = editViaje.lineas.find(ln => ln.id === fl.id)?.concentrado_humedo ?? 0
                     const dispTotal = (lote?.toneladas_disponibles ?? 0) + origHum
-                    const inp = (val: string, field: 'humedo_s' | 'maquila_s' | 'valor_s', w = '6rem') => (
-                      <input type="number" step="0.01"
-                        style={{ fontSize: 'var(--fs-sm)', padding: '0.2rem 0.4rem', border: '1px solid var(--border)', borderRadius: 4, textAlign: 'right', width: w }}
-                        value={val} onChange={e => updEditLinea(i, field, e.target.value)} />
-                    )
                     return (
                       <tr key={fl.id}>
                         <td style={{ fontWeight: 700 }} className="mono">{fl.lote}</td>
-                        <td>
-                          <input type="text"
-                            style={{ fontSize: 'var(--fs-sm)', padding: '0.2rem 0.4rem', border: '1px solid var(--border)', borderRadius: 4, width: '100%', minWidth: '8rem' }}
-                            value={fl.concepto} onChange={e => updEditLinea(i, 'concepto', e.target.value)} />
-                        </td>
-                        <td>
+                        <td style={{ textAlign: 'right' }}>
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-                            {inp(fl.humedo_s, 'humedo_s')}
-                            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
-                              Disp: {dispTotal.toFixed(2)} t
-                            </span>
+                            <input type="number" step="0.01" max={dispTotal}
+                              style={{ fontSize: 'var(--fs-sm)', padding: '0.25rem 0.5rem', border: '1px solid var(--border-default)', borderRadius: 6, textAlign: 'right', width: '6.5rem' }}
+                              value={fl.humedo_s} onChange={e => updEditLinea(i, 'humedo_s', e.target.value)} />
+                            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Disp {dispTotal.toFixed(2)} t</span>
                           </div>
                         </td>
-                        <td>{inp(fl.maquila_s, 'maquila_s', '7rem')}</td>
-                        <td>{inp(fl.valor_s, 'valor_s', '7rem')}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <input type="number" step="1000"
+                            style={{ fontSize: 'var(--fs-sm)', padding: '0.25rem 0.5rem', border: '1px solid var(--border-default)', borderRadius: 6, textAlign: 'right', width: '8rem' }}
+                            value={fl.valor_s} onChange={e => updEditLinea(i, 'valor_s', e.target.value)} />
+                        </td>
+                        <td style={{ textAlign: 'center' }}><Button variant="ghost" size="sm" icon={<Trash2 size={13}/>} title="Quitar lote del viaje" onClick={() => removeEditLinea(i)} /></td>
                       </tr>
                     )
                   })}
                 </tbody>
                 <tfoot>
                   <tr style={{ fontWeight: 700 }}>
-                    <td colSpan={2}>Total</td>
-                    <td style={{ textAlign: 'right' }} className="mono">
-                      {formEditLineas.reduce((s, fl) => s + (Number(fl.humedo_s) || 0), 0).toFixed(2)} t
-                    </td>
-                    <td style={{ textAlign: 'right' }} className="mono">
-                      {cop(formEditLineas.reduce((s, fl) => s + (Number(fl.maquila_s) || 0), 0))}
-                    </td>
-                    <td style={{ textAlign: 'right' }} className="mono">
-                      {cop(formEditLineas.reduce((s, fl) => s + (Number(fl.valor_s) || 0), 0))}
-                    </td>
+                    <td>Total</td>
+                    <td style={{ textAlign: 'right' }} className="mono">{formEditLineas.reduce((s, fl) => s + (Number(fl.humedo_s) || 0), 0).toFixed(2)} t</td>
+                    <td style={{ textAlign: 'right' }} className="mono">{cop(formEditLineas.reduce((s, fl) => s + (Number(fl.valor_s) || 0), 0))}</td>
+                    <td />
                   </tr>
                 </tfoot>
               </table>
             </div>
+
+            {/* Agregar lotes — abre modal de selección (como al crear) */}
+            <div style={{ marginTop: '1rem' }}>
+              <Button size="sm" variant="secondary" icon={<Plus size={14}/>} disabled={disponiblesAgregar.length === 0} onClick={abrirAgregarLotes}>
+                Agregar lotes{disponiblesAgregar.length > 0 ? ` (${disponiblesAgregar.length} disponibles)` : ''}
+              </Button>
+              {disponiblesAgregar.length === 0 && <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginLeft: 8 }}>No hay más lotes con concentrado disponible.</span>}
+            </div>
+            <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: '0.75rem' }}>
+              Solo eliges qué lotes van y cuánto tomas de cada uno (parcial permitido). La maquila se calcula sola; la info del lote se edita en <strong>Procesamiento</strong>.
+            </p>
           </>
+          )
+        })()}
+      </Modal>
+
+      {/* ── Modal: Agregar lotes (selección, como al crear) ── */}
+      <Modal open={addOpen} title="Agregar lotes al viaje" onClose={() => setAddOpen(false)}
+        footer={<>
+          <Button variant="secondary" onClick={() => setAddOpen(false)}>Cancelar</Button>
+          <Button onClick={confirmarAgregarLotes} disabled={!addSel.some(s => s.checked)}>
+            Agregar ({addSel.filter(s => s.checked).length})
+          </Button>
+        </>}>
+        {addSel.length === 0 ? (
+          <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '1.5rem 0' }}>No hay lotes con concentrado disponible.</p>
+        ) : (
+          <div className="table-wrap" style={{ maxHeight: '22rem' }}>
+            <table className="data-table" style={{ fontSize: 'var(--fs-sm)' }}>
+              <thead>
+                <tr>
+                  <th style={{ width: '2rem' }}></th>
+                  <th>Lote</th>
+                  <th style={{ textAlign: 'right' }}>Disponible</th>
+                  <th style={{ textAlign: 'right' }}>Au (g/t)</th>
+                  <th style={{ textAlign: 'right' }}>A despachar (t)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {addSel.map(s => (
+                  <tr key={s.id} style={{ background: s.checked ? 'var(--green-50)' : undefined, cursor: 'pointer' }}
+                    onClick={() => updAddSel(s.id, { checked: !s.checked })}>
+                    <td><input type="checkbox" checked={s.checked} onChange={e => updAddSel(s.id, { checked: e.target.checked })} onClick={e => e.stopPropagation()} /></td>
+                    <td style={{ fontWeight: 700 }} className="mono">{s.codigo}</td>
+                    <td style={{ textAlign: 'right' }} className="mono">{s.disp.toFixed(2)} t</td>
+                    <td style={{ textAlign: 'right' }} className="mono">{s.auT > 0 ? s.auT.toFixed(1) : '—'}</td>
+                    <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                      <input type="number" step="0.01" max={s.disp} disabled={!s.checked}
+                        style={{ fontSize: 'var(--fs-sm)', padding: '0.25rem 0.5rem', border: '1px solid var(--border-default)', borderRadius: 6, textAlign: 'right', width: '6.5rem', background: s.checked ? undefined : 'var(--slate-50)' }}
+                        value={s.humedo_s} onChange={e => updAddSel(s.id, { humedo_s: e.target.value })} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Modal>
 

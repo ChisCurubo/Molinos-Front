@@ -25,10 +25,12 @@ export function useEntradas() {
   const [loading, setLoading] = useState(cache === null)
   const [error, setError] = useState<string | null>(null)
 
-  const run = useCallback(() => {
+  // showLoading=false: re-consulta en segundo plano manteniendo en pantalla
+  // los datos previos (tras crear/editar/borrar), para que la tabla no parpadee.
+  const run = useCallback((showLoading = true) => {
     setError(null)
     if (cache !== null) { setData(cache); setLoading(false); return }
-    setLoading(true)
+    if (showLoading) setLoading(true)
     if (!promise) {
       promise = materialApi.getEntradas({ limit: 1000, offset: 0 })
         .then(r => { cache = r; return r })
@@ -38,7 +40,11 @@ export function useEntradas() {
   }, [])
 
   useEffect(() => {
-    const sync = () => { setData(cache); setLoading(cache === null && !!promise) }
+    const sync = () => {
+      if (cache !== null) { setData(cache); setLoading(false) }
+      // Caché invalidada: volver a consultar sin ocultar lo ya visible.
+      else run(false)
+    }
     listeners.add(sync)
     run()
     return () => { listeners.delete(sync) }

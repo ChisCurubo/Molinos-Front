@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState, type CSSProperties } from 'react'
-import { ChevronDown, ChevronUp, FlaskConical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Coins, FlaskConical, Pencil, Plus, Trash2 } from 'lucide-react'
 import { Button, Card, Input, KpiTile, Modal, Select } from '@/components/ui'
 import { PageHeader } from '@/components/common/Page'
 import { MineroField } from '@/components/common/MineroField'
@@ -88,6 +88,96 @@ function StatRow({ label, value, sub }: { label: string; value: string; sub?: st
       <span style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>{label}</span>
       <span style={{ float: 'right', fontWeight: 600, fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-sm)' }}>{value}</span>
       {sub && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-faint)', marginTop: 2 }}>{sub}</div>}
+    </div>
+  )
+}
+
+// ── Precio del material (Fase 3) — formulario compacto en el detalle ──────────
+// Demo local: sin backend. Al confirmar actualiza el estado (setMateriales).
+// Visible con tenor listo (Fase 2). Si ya hay precio_total → solo lectura.
+type MetodoPrecio = 'por_gramo' | 'por_tonelada'
+function PrecioSection({ m, seco, canWrite, onConfirm }: {
+  m: MaterialRow; seco: number; canWrite: boolean
+  onConfirm: (payload: { precio_por_gramo?: number; precio_por_tonelada?: number; precio_total: number }) => void
+}) {
+  const gramos = seco * m.tenor // gramos totales de Au = ton secas × tenor (gr/t)
+  const [metodo, setMetodo] = useState<MetodoPrecio>('por_gramo')
+  const [precioStr, setPrecioStr] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const precio = Number(precioStr)
+  const precioValido = precioStr.trim() !== '' && Number.isFinite(precio) && precio > 0
+  const preview = precioValido ? (metodo === 'por_gramo' ? gramos * precio : seco * precio) : null
+
+  const cambiarMetodo = (v: MetodoPrecio) => { setMetodo(v); setPrecioStr('') }
+
+  const confirmar = () => {
+    if (!precioValido || saving) return
+    setSaving(true)
+    // Simula la llamada al backend (PATCH .../precio) para mostrar el loading.
+    setTimeout(() => {
+      const total = metodo === 'por_gramo' ? gramos * precio : seco * precio
+      onConfirm(metodo === 'por_gramo'
+        ? { precio_por_gramo: precio, precio_total: total }
+        : { precio_por_tonelada: precio, precio_total: total })
+      setSaving(false)
+    }, 450)
+  }
+
+  const titulo = (
+    <div style={{ fontWeight: 700, fontSize: 'var(--fs-sm)', color: 'var(--amber-800)', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem' }}>
+      <Coins size={14} /> Precio del material
+    </div>
+  )
+
+  // ── Solo lectura: precio ya confirmado (> 0; null o 0 = pendiente) ──
+  if ((m.precio_total ?? 0) > 0) {
+    return (
+      <div>
+        {titulo}
+        <div style={{ fontSize: 'var(--fs-sm)', display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.15rem 0.75rem' }}>
+          {(m.precio_por_gramo ?? 0) > 0 && <><span style={{ color: 'var(--text-muted)' }}>Precio por gramo</span><strong className="mono">{cop(m.precio_por_gramo ?? 0)}</strong></>}
+          {(m.precio_por_tonelada ?? 0) > 0 && <><span style={{ color: 'var(--text-muted)' }}>Precio por tonelada</span><strong className="mono">{cop(m.precio_por_tonelada ?? 0)}</strong></>}
+          <span style={{ color: 'var(--text-muted)' }}>Precio confirmado</span>
+          <strong className="mono" style={{ color: '#15803d' }}>{cop(m.precio_total ?? 0)}</strong>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Formulario: tenor listo y precio pendiente ──
+  const unidad = metodo === 'por_gramo' ? '$/gr Au' : '$/ton seca'
+  return (
+    <div>
+      {titulo}
+      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
+        Tenor Au: <strong className="mono" style={{ color: 'var(--amber-700)' }}>{m.tenor.toFixed(2)}</strong> g/t
+      </div>
+      {canWrite ? (
+        <div style={{ display: 'grid', gap: '0.5rem' }}>
+          <Select label="Pagar por" value={metodo} onChange={e => cambiarMetodo(e.target.value as MetodoPrecio)} disabled={saving}
+            options={[{ value: 'por_gramo', label: 'Por gramo' }, { value: 'por_tonelada', label: 'Por tonelada' }]} />
+          <Input label={`Precio (${unidad})`} type="number" min="0" step="any" mono disabled={saving}
+            placeholder={metodo === 'por_gramo' ? 'Precio por gramo' : 'Precio por tonelada'}
+            value={precioStr} onChange={e => setPrecioStr(e.target.value)} />
+          <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+            <div style={{ marginBottom: '0.15rem' }}>Referencia:</div>
+            <div className="mono" style={{ color: 'var(--text-body)' }}>
+              {metodo === 'por_gramo' ? `Gramos totales: ${gramos.toFixed(2)} gr` : `Ton secas: ${seco.toFixed(2)} t`}
+            </div>
+          </div>
+          {preview != null && (
+            <div style={{ fontSize: 'var(--fs-sm)' }}>
+              Pagaríamos: <strong className="mono" style={{ color: '#15803d' }}>{cop(preview)}</strong>
+            </div>
+          )}
+          <Button size="sm" onClick={confirmar} disabled={!precioValido || saving}>
+            {saving ? 'Guardando…' : 'Confirmar precio'}
+          </Button>
+        </div>
+      ) : (
+        <em style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-sm)' }}>Sin precio registrado.</em>
+      )}
     </div>
   )
 }
@@ -280,6 +370,11 @@ export function EntradasPage() {
   const deleteMaterial = (id: number) => {
     if (!confirm('¿Eliminar este registro de material?')) return
     setMateriales((prev) => prev.filter((m) => m.id !== id))
+  }
+
+  // Confirmar precio (Fase 3) — actualiza el estado local sin recargar.
+  const confirmarPrecio = (id: number, payload: { precio_por_gramo?: number; precio_por_tonelada?: number; precio_total: number }) => {
+    setMateriales((prev) => prev.map((m) => m.id === id ? { ...m, ...payload } : m))
   }
 
   // ── Opciones selects ──
@@ -543,7 +638,7 @@ export function EntradasPage() {
                   {isExp && (
                     <tr>
                       <td colSpan={canWrite ? 11 : 10} style={{ padding: '0.85rem 1.25rem', background: '#fafaf9' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '1.25rem' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: (m.tenor > 0 || (m.precio_total ?? 0) > 0) ? '1.5fr 1fr 1fr' : '1.6fr 1fr', gap: '1.25rem' }}>
                           {/* Análisis */}
                           <div>
                             <div style={{ fontWeight: 700, fontSize: 'var(--fs-sm)', marginBottom: '0.5rem', color: 'var(--amber-800)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
@@ -605,6 +700,12 @@ export function EntradasPage() {
                               {m.lote && <><span style={{ color: 'var(--text-muted)' }}>Lote</span><strong>{m.lote}</strong></>}
                             </div>
                           </div>
+
+                          {/* Precio del material (Fase 3) */}
+                          {(m.tenor > 0 || (m.precio_total ?? 0) > 0) && (
+                            <PrecioSection m={m} seco={seco} canWrite={canWrite}
+                              onConfirm={(payload) => confirmarPrecio(m.id, payload)} />
+                          )}
                         </div>
                       </td>
                     </tr>

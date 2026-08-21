@@ -1,8 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
-import { ChevronDown, ChevronUp, FlaskConical, Pencil, Plus, Trash2 } from 'lucide-react'
-import { Button, Card, Input, Modal, KpiTile, useToast } from '@/components/ui'
+import { ChevronDown, ChevronUp, Coins, FlaskConical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Button, Card, Input, Modal, Select, KpiTile, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
-import { MinaSelect, VolquetaSelect, DuenoSelect } from '@/components/common/CatalogSelectors'
+import { MinaSelect, VolquetaSelect, DuenoSelect, TipoMaterialSelect } from '@/components/common/CatalogSelectors'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
 import { AnalisisCabezaModal, EditAnalisisModal } from '@/components/materiales/analisisModals'
 import { useCanWrite } from '@/hooks/usePermissions'
@@ -12,7 +12,8 @@ import { apiError } from '@/api/client'
 import { formatCOP } from '@/utils/format'
 import {
   materialApi, num,
-  type EntradaRow, type EntradaDetalle, type EstadoEntrada, type EstadoPagoFlete,
+  type EntradaRow, type EntradaDetalle, type EstadoEntrada, type EstadoPagoFlete, type MetodoCalculo,
+  type GastosOperativosPayload,
 } from '@/api/material'
 
 const cop = formatCOP
@@ -63,52 +64,133 @@ function humedadPct(r: EntradaRow): number | null {
 // ════════════════════════════════════════════════════════════════════════════
 // Modal registrar / editar (con «Cancelar entrada» dentro del de edición)
 // ════════════════════════════════════════════════════════════════════════════
-function LlegadaModal({ open, editId, onClose, onSaved, onRequestDelete }: {
+// Dec → string para inputs (vacío si es 0/null).
+const decStr = (v: unknown) => { const n = num(v); return n > 0 ? String(n) : '' }
+// Solo estos costos se editan desde materiales. Maquila y volqueta son solo
+// lectura (se ven en el detalle, no se tocan aquí).
+const GASTO_KEYS: { key: keyof GastosState; api: keyof GastosOperativosPayload; label: string }[] = [
+  { key: 'cargue', api: 'costo_cargue', label: 'Cargue' },
+  { key: 'bascula', api: 'costo_bascula', label: 'Báscula' },
+  { key: 'adicional', api: 'costo_adicional', label: 'Adicional' },
+]
+type GastosState = { cargue: string; bascula: string; adicional: string }
+const EMPTY_GASTOS: GastosState = { cargue: '', bascula: '', adicional: '' }
+
+export function LlegadaModal({ open, editId, onClose, onSaved, onRequestDelete, simple = false }: {
   open: boolean; editId: number | null; onClose: () => void; onSaved: () => void; onRequestDelete: () => void
+  /** `simple`: solo campos de la llegada (hasta ACPM); oculta precio/gastos/excedente. */
+  simple?: boolean
 }) {
   const toast = useToast()
   const [saving, setSaving] = useState(false)
   const [volquetaNueva, setVolquetaNueva] = useState(false)
   const [form, setForm] = useState({
     numero_volqueta: '', id_mina: '' as number | '', id_vehiculo: '' as number | '',
-    id_tipo_material: '1', fecha_llegada: today(), peso_llegada_planta: '', comentarios: '',
+    id_tipo_material: '' as number | '', fecha_llegada: today(), peso_llegada_planta: '', acpm: '', comentarios: '',
   })
+  const [formIni, setFormIni] = useState('')  // snapshot JSON de los campos de la entrada
   const [nueva, setNueva] = useState({ placa: '', conductor: '', conductor_cc: '', id_dueno: '' as number | '', tipo_vehiculo: '', capacidad_ton: '' })
+  // Edición del precio (Fase 3) — solo en modo edición y con tenor listo.
+  const [precioEdit, setPrecioEdit] = useState({ tenor: 0, tonSecas: 0, metodo: 'por_gramo' as MetodoCalculo, valor: '' })
+  const [precioInicial, setPrecioInicial] = useState({ metodo: 'por_gramo' as MetodoCalculo, valor: '' })
+  // Gastos operativos y excedente (paneles editables en modo edición).
+  const [gastos, setGastos] = useState<GastosState>(EMPTY_GASTOS)
+  const [gastosIni, setGastosIni] = useState<GastosState>(EMPTY_GASTOS)
+  // Excedente = ton secas × número. Guardamos el «número» (factor); el total va al PUT.
+  const [excedenteNum, setExcedenteNum] = useState('')
+  const [excedenteNumIni, setExcedenteNumIni] = useState('')
 
   useEffect(() => {
     if (!open) return
     setVolquetaNueva(false)
     setNueva({ placa: '', conductor: '', conductor_cc: '', id_dueno: '', tipo_vehiculo: '', capacidad_ton: '' })
+    setPrecioEdit({ tenor: 0, tonSecas: 0, metodo: 'por_gramo', valor: '' })
+    setPrecioInicial({ metodo: 'por_gramo', valor: '' })
+    setGastos(EMPTY_GASTOS); setGastosIni(EMPTY_GASTOS)
+    setExcedenteNum(''); setExcedenteNumIni('')
     if (editId != null) {
-      materialApi.getEntrada(editId).then(d => setForm({
-        numero_volqueta: String(d.numero_volqueta),
-        id_mina: d.mina_id ?? '', id_vehiculo: d.vehiculo_id ?? '', id_tipo_material: '1',
-        fecha_llegada: d.fecha_llegada?.slice(0, 10) ?? today(),
-        peso_llegada_planta: String(num(d.peso_llegada_planta)), comentarios: d.comentarios ?? '',
-      })).catch(e => toast.error(apiError(e).message))
+      materialApi.getEntrada(editId).then(d => {
+        const f = {
+          numero_volqueta: String(d.numero_volqueta),
+          id_mina: (d.mina_id ?? '') as number | '', id_vehiculo: (d.vehiculo_id ?? '') as number | '',
+          id_tipo_material: (d.tipo_material_id ?? '') as number | '',
+          fecha_llegada: d.fecha_llegada?.slice(0, 10) ?? today(),
+          peso_llegada_planta: String(num(d.peso_llegada_planta)), acpm: decStr(d.detalle.acpm_adelantado),
+          comentarios: d.comentarios ?? '',
+        }
+        setForm(f); setFormIni(JSON.stringify(f))
+        const porTon = num(d.precio_por_tonelada)
+        const metodo: MetodoCalculo = porTon > 0 ? 'por_tonelada' : 'por_gramo'
+        const valor = porTon > 0 ? String(porTon) : (num(d.precio_por_gramo) > 0 ? String(num(d.precio_por_gramo)) : '')
+        setPrecioEdit({ tenor: num(d.tenor), tonSecas: num(d.total_material_seco), metodo, valor })
+        setPrecioInicial({ metodo, valor })
+        // Costos editables (cargue, báscula, adicional). Maquila y volqueta: solo lectura.
+        const g: GastosState = {
+          cargue: decStr(d.detalle.costo_cargue ?? d.costo_cargue),
+          bascula: decStr(d.detalle.costo_bascula ?? d.costo_bascula),
+          adicional: decStr(d.detalle.costo_adicional ?? d.costo_adicional),
+        }
+        setGastos(g); setGastosIni(g)
+        // Excedente = ton secas × número → retrocalculamos el número desde el valor guardado.
+        const excCop = num(d.detalle.excedente ?? d.excedente_calculado)
+        const ts = num(d.total_material_seco)
+        const factor = excCop > 0 && ts > 0 ? String(excCop / ts) : ''
+        setExcedenteNum(factor); setExcedenteNumIni(factor)
+      }).catch(e => toast.error(apiError(e).message))
     } else {
-      setForm({ numero_volqueta: '', id_mina: '', id_vehiculo: '', id_tipo_material: '1', fecha_llegada: today(), peso_llegada_planta: '', comentarios: '' })
+      const f = { numero_volqueta: '', id_mina: '' as number | '', id_vehiculo: '' as number | '', id_tipo_material: '' as number | '', fecha_llegada: today(), peso_llegada_planta: '', acpm: '', comentarios: '' }
+      setForm(f); setFormIni('')
     }
   }, [open, editId, toast])
 
   const valid = form.numero_volqueta && form.id_mina !== '' && form.peso_llegada_planta &&
-    (editId != null || (volquetaNueva ? nueva.placa.trim() !== '' : form.id_vehiculo !== ''))
+    (editId != null || (form.id_tipo_material !== '' && (volquetaNueva ? nueva.placa.trim() !== '' : form.id_vehiculo !== '')))
 
   const save = async () => {
     if (!valid) { toast.error('Completa los campos obligatorios'); return }
     setSaving(true)
     try {
       if (editId != null) {
-        await materialApi.updateEntrada(editId, {
-          numero_volqueta: Number(form.numero_volqueta),
-          id_mina: form.id_mina === '' ? undefined : form.id_mina,
-          id_vehiculo: form.id_vehiculo === '' ? undefined : form.id_vehiculo,
-          id_tipo_material: Number(form.id_tipo_material),
-          fecha_llegada: form.fecha_llegada,
-          peso_llegada_planta: Number(form.peso_llegada_planta),
-          comentarios: form.comentarios || undefined,
-        })
-        toast.success('Entrada actualizada')
+        // Solo disparamos las llamadas de los paneles que cambiaron.
+        if (JSON.stringify(form) !== formIni) {
+          await materialApi.updateEntrada(editId, {
+            numero_volqueta: Number(form.numero_volqueta),
+            id_mina: form.id_mina === '' ? undefined : form.id_mina,
+            id_vehiculo: form.id_vehiculo === '' ? undefined : form.id_vehiculo,
+            id_tipo_material: form.id_tipo_material === '' ? undefined : Number(form.id_tipo_material),
+            fecha_llegada: form.fecha_llegada,
+            peso_llegada_planta: Number(form.peso_llegada_planta),
+            acpm_adelantado: form.acpm === '' ? undefined : Number(form.acpm),
+            comentarios: form.comentarios || undefined,
+          })
+        }
+        // Paneles avanzados (precio, gastos, excedente): solo en modo completo.
+        if (!simple) {
+          // Precio (Fase 3): solo si cambió y es válido.
+          const pValorNum = Number(precioEdit.valor)
+          const pCambio = precioEdit.valor.trim() !== '' && Number.isFinite(pValorNum) && pValorNum > 0 &&
+            (precioEdit.metodo !== precioInicial.metodo || precioEdit.valor !== precioInicial.valor)
+          if (precioEdit.tenor > 0 && pCambio) {
+            await materialApi.setPrecioEntrada(editId, precioEdit.metodo === 'por_gramo'
+              ? { precio_por_gramo: pValorNum }
+              : { precio_por_tonelada: pValorNum })
+          }
+          // Gastos operativos: manda solo los costos que cambiaron.
+          const gastosBody: GastosOperativosPayload = {}
+          for (const { key, api } of GASTO_KEYS) {
+            if (gastos[key] !== gastosIni[key]) gastosBody[api] = Number(gastos[key]) || 0
+          }
+          if (Object.keys(gastosBody).length > 0) await materialApi.updateGastosOperativos(editId, gastosBody)
+          // Excedente = ton secas × número. Se envía el «número» (factor); el backend
+          // lo multiplica por las ton secas. NO enviar el total ya calculado.
+          if (excedenteNum !== excedenteNumIni && excedenteNum.trim() !== '') {
+            const factor = Number(excedenteNum)
+            if (Number.isFinite(factor) && factor >= 0) {
+              await materialApi.putExcedente(editId, { excedente: factor, fecha_calculo: today() })
+            }
+          }
+        }
+        toast.success('Cambios guardados')
       } else {
         await materialApi.createEntrada({
           numero_volqueta: Number(form.numero_volqueta),
@@ -117,6 +199,7 @@ function LlegadaModal({ open, editId, onClose, onSaved, onRequestDelete }: {
           id_tipo_material: Number(form.id_tipo_material),
           fecha_llegada: form.fecha_llegada,
           peso_llegada_planta: Number(form.peso_llegada_planta),
+          acpm_adelantado: form.acpm === '' ? undefined : Number(form.acpm),
           comentarios: form.comentarios || undefined,
           ...(volquetaNueva ? {
             nueva_volqueta: {
@@ -132,6 +215,9 @@ function LlegadaModal({ open, editId, onClose, onSaved, onRequestDelete }: {
       onSaved(); onClose()
     } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
   }
+
+  const totalGastos = GASTO_KEYS.reduce((s, { key }) => s + (Number(gastos[key]) || 0), 0)
+  const excedenteCalc = precioEdit.tonSecas * (Number(excedenteNum) || 0)
 
   return (
     <Modal open={open} title={editId != null ? `Editar entrada N° ${form.numero_volqueta}` : 'Registrar llegada de material'} onClose={onClose}
@@ -173,15 +259,178 @@ function LlegadaModal({ open, editId, onClose, onSaved, onRequestDelete }: {
         <Input label="N° volqueta" type="number" step="1" required value={form.numero_volqueta} onChange={e => setForm(f => ({ ...f, numero_volqueta: e.target.value }))} />
         <Input label="Fecha de llegada" type="date" required value={form.fecha_llegada} onChange={e => setForm(f => ({ ...f, fecha_llegada: e.target.value }))} />
         <MinaSelect required value={form.id_mina} onChange={v => setForm(f => ({ ...f, id_mina: v }))} />
-        <Input label="Tipo de material (id)" type="number" required value={form.id_tipo_material} onChange={e => setForm(f => ({ ...f, id_tipo_material: e.target.value }))} />
+        <TipoMaterialSelect required value={form.id_tipo_material} onChange={v => setForm(f => ({ ...f, id_tipo_material: v }))} />
         <Input label="Toneladas (peso húmedo)" type="number" step="0.001" required value={form.peso_llegada_planta} onChange={e => setForm(f => ({ ...f, peso_llegada_planta: e.target.value }))} />
+        <Input label="ACPM adelantado (COP)" type="number" step="1000" mono value={form.acpm} onChange={e => setForm(f => ({ ...f, acpm: e.target.value }))} helper="Se descuenta del flete al pagar." />
         <Input label="Comentarios" value={form.comentarios} onChange={e => setForm(f => ({ ...f, comentarios: e.target.value }))} />
       </div>
+
+      {!simple && editId != null && precioEdit.tenor > 0 && (() => {
+        const pValorNum = Number(precioEdit.valor)
+        const pValido = precioEdit.valor.trim() !== '' && Number.isFinite(pValorNum) && pValorNum > 0
+        const pGramos = precioEdit.tonSecas * precioEdit.tenor
+        const pPreview = pValido ? calcPrecioTotal(precioEdit.metodo, pValorNum, pGramos, precioEdit.tonSecas) : null
+        const unidad = precioEdit.metodo === 'por_gramo' ? '$/gr Au' : '$/ton seca'
+        return (
+          <div style={{ border: '1.5px solid var(--amber-300)', borderRadius: 'var(--radius-md)', padding: '0.75rem', marginTop: '0.85rem', background: '#fffbf0' }}>
+            <div style={{ fontWeight: 700, fontSize: 'var(--fs-sm)', color: 'var(--amber-800)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <Coins size={14} /> Precio del material
+            </div>
+            <div className="grid grid--form" style={{ gridTemplateColumns: '1fr 1fr' }}>
+              <Select label="Pagar por" value={precioEdit.metodo} disabled={saving}
+                onChange={e => setPrecioEdit(p => ({ ...p, metodo: e.target.value as MetodoCalculo, valor: '' }))}
+                options={[{ value: 'por_gramo', label: 'Por gramo' }, { value: 'por_tonelada', label: 'Por tonelada' }]} />
+              <Input label={`Precio (${unidad})`} type="number" min="0" step="any" mono disabled={saving}
+                placeholder={precioEdit.metodo === 'por_gramo' ? 'Precio por gramo' : 'Precio por tonelada'}
+                value={precioEdit.valor} onChange={e => setPrecioEdit(p => ({ ...p, valor: e.target.value }))}
+                helper={precioEdit.metodo === 'por_gramo' ? `Referencia: ${pGramos.toFixed(2)} gr Au` : `Referencia: ${precioEdit.tonSecas.toFixed(2)} t secas`} />
+            </div>
+            <div style={{ marginTop: '0.5rem', fontSize: 'var(--fs-sm)' }}>
+              Pagaríamos: {pPreview != null
+                ? <strong className="mono" style={{ color: '#15803d' }}>{cop(pPreview)}</strong>
+                : <em style={{ color: 'var(--text-faint)' }}>—</em>}
+              {precioInicial.valor !== '' && <span style={{ color: 'var(--text-faint)', marginLeft: 8, fontSize: 'var(--fs-xs)' }}>(deja igual para no cambiarlo)</span>}
+            </div>
+          </div>
+        )
+      })()}
+
+      {!simple && editId != null && (
+        <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: '0.75rem', marginTop: '0.85rem' }}>
+          <div style={{ fontWeight: 700, fontSize: 'var(--fs-sm)', color: 'var(--amber-800)', marginBottom: '0.5rem' }}>Gastos operativos</div>
+          <div className="grid grid--form" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+            {GASTO_KEYS.map(({ key, label }) => (
+              <Input key={key} label={label} type="number" min="0" step="any" mono disabled={saving}
+                value={gastos[key]} onChange={e => setGastos(g => ({ ...g, [key]: e.target.value }))} />
+            ))}
+          </div>
+          <div style={{ marginTop: '0.5rem', fontSize: 'var(--fs-sm)' }}>
+            Subtotal editable: <strong className="mono" style={{ color: '#b45309' }}>{cop(totalGastos)}</strong>
+            <span style={{ color: 'var(--text-faint)', marginLeft: 8, fontSize: 'var(--fs-xs)' }}>Maquila, volqueta, flete y ACPM son solo lectura (en el detalle).</span>
+          </div>
+        </div>
+      )}
+
+      {!simple && editId != null && (
+        <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: '0.75rem', marginTop: '0.85rem' }}>
+          <div style={{ fontWeight: 700, fontSize: 'var(--fs-sm)', color: 'var(--amber-800)', marginBottom: '0.5rem' }}>Excedente</div>
+          <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
+            Ton secas: <strong className="mono">{precioEdit.tonSecas.toFixed(4)} t</strong>
+          </div>
+          <div className="grid grid--form">
+            <Input label="Número (× ton secas)" type="number" min="0" step="any" mono disabled={saving}
+              value={excedenteNum} onChange={e => setExcedenteNum(e.target.value)}
+              helper="El excedente = ton secas × este número. Se guarda aparte; no afecta el total del material." />
+          </div>
+          <div style={{ marginTop: '0.5rem', fontSize: 'var(--fs-sm)' }}>
+            Excedente: {excedenteNum.trim() !== '' && Number(excedenteNum) > 0
+              ? <strong className="mono" style={{ color: '#15803d' }}>{cop(excedenteCalc)}</strong>
+              : <em style={{ color: 'var(--text-faint)' }}>—</em>}
+          </div>
+        </div>
+      )}
+
       <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginTop: '0.75rem' }}>
         El análisis se agrega después con <FlaskConical size={13} style={{ display: 'inline', verticalAlign: 'middle' }} /> en la tabla.
       </p>
     </Modal>
   )
+}
+
+// Mensajes por código HTTP del PATCH .../precio (validación en el backend).
+const PRECIO_MSG: Record<number, string> = {
+  400: 'Precio inválido: debe ser mayor a 0 y con un solo método.',
+  404: 'La entrada ya no existe.',
+  409: 'No se puede fijar el precio: la entrada está cancelada o sin análisis (Fase 2 incompleta).',
+}
+
+// Calcula el precio total (COP) a partir del método y precio unitario.
+function calcPrecioTotal(metodo: MetodoCalculo, precio: number, gramos: number, tonSecas: number) {
+  return metodo === 'por_gramo' ? gramos * precio : tonSecas * precio
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Modal · Registrar precio (Fase 3) — se abre desde el botón «Precio» de la fila.
+// La edición de un precio ya fijado se hace en el modal de edición del material.
+// ════════════════════════════════════════════════════════════════════════════
+function PrecioModal({ row, onClose, onSaved }: {
+  row: EntradaRow | null; onClose: () => void; onSaved: () => void
+}) {
+  const toast = useToast()
+  const [metodo, setMetodo] = useState<MetodoCalculo>('por_gramo')
+  const [precioStr, setPrecioStr] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (row) { setMetodo('por_gramo'); setPrecioStr(''); setError(null); setSaving(false) }
+  }, [row])
+
+  const tenor = num(row?.tenor)
+  const tonSecas = num(row?.total_material_seco)
+  const gramos = tonSecas * tenor // Au total (g) = ton secas × tenor (g/t)
+
+  const precio = Number(precioStr)
+  const precioValido = precioStr.trim() !== '' && Number.isFinite(precio) && precio > 0
+  const preview = precioValido ? calcPrecioTotal(metodo, precio, gramos, tonSecas) : null
+
+  const cambiarMetodo = (m: MetodoCalculo) => { setMetodo(m); setPrecioStr(''); setError(null) }
+
+  const confirmar = async () => {
+    if (!row || !precioValido || saving) return
+    setSaving(true); setError(null)
+    try {
+      await materialApi.setPrecioEntrada(row.id, metodo === 'por_gramo'
+        ? { precio_por_gramo: precio }
+        : { precio_por_tonelada: precio })
+      toast.success('Precio registrado')
+      onSaved(); onClose()
+    } catch (e) {
+      const { status, message } = apiError(e)
+      setError(status && PRECIO_MSG[status] ? PRECIO_MSG[status] : message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const unidad = metodo === 'por_gramo' ? '$/gr Au' : '$/ton seca'
+  return (
+    <Modal open={!!row} title={`Registrar precio · N° ${row?.numero_volqueta ?? ''}`} onClose={onClose}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
+          <Button onClick={confirmar} disabled={!precioValido || saving}>{saving ? 'Guardando…' : 'Confirmar precio'}</Button>
+        </>
+      }>
+      {row && (
+        <>
+          <div className="callout" style={{ marginBottom: '1rem', fontSize: 'var(--fs-sm)' }}>
+            <strong>{row.mina ?? '—'}</strong> · Tenor Au <strong className="mono">{tenor.toFixed(2)} g/t</strong> · Ton secas <strong className="mono">{tonSecas.toFixed(4)} t</strong>
+          </div>
+          <div className="grid grid--form">
+            <Select label="Pagar por" value={metodo} onChange={e => cambiarMetodo(e.target.value as MetodoCalculo)} disabled={saving}
+              options={[{ value: 'por_gramo', label: 'Por gramo' }, { value: 'por_tonelada', label: 'Por tonelada' }]} />
+            <Input label={`Precio (${unidad})`} type="number" min="0" step="any" mono disabled={saving}
+              placeholder={metodo === 'por_gramo' ? 'Precio por gramo' : 'Precio por tonelada'}
+              value={precioStr} onChange={e => setPrecioStr(e.target.value)}
+              helper={metodo === 'por_gramo' ? `Referencia: ${gramos.toFixed(2)} gr Au totales` : `Referencia: ${tonSecas.toFixed(2)} t secas`} />
+          </div>
+          <div style={{ marginTop: '0.75rem', fontSize: 'var(--fs-sm)' }}>
+            Pagaríamos: {preview != null
+              ? <strong className="mono" style={{ color: '#15803d' }}>{cop(preview)}</strong>
+              : <em style={{ color: 'var(--text-faint)' }}>—</em>}
+          </div>
+          {error && <p style={{ color: 'var(--rose-600)', fontSize: 'var(--fs-sm)', marginTop: '0.5rem' }}>{error}</p>}
+        </>
+      )}
+    </Modal>
+  )
+}
+
+// Encabezado de subgrupo dentro de «Detalle del material».
+const SUBHEAD: CSSProperties = {
+  gridColumn: '1 / -1', marginTop: '0.45rem', paddingTop: '0.3rem', borderTop: '1px solid #ececea',
+  fontSize: '0.62rem', letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700,
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -206,7 +455,7 @@ function DetalleRow({ id, canWrite, cols, nonce, onAddAnalisis, onEditAnalisis, 
         {loading ? <span style={{ color: 'var(--text-muted)' }}>Cargando detalle…</span>
         : error ? <span style={{ color: 'var(--rose-600)' }}>{error} · <button onClick={load} style={{ background: 'none', border: 'none', color: 'var(--amber-700)', textDecoration: 'underline', cursor: 'pointer' }}>Reintentar</button></span>
         : d && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '1.25rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '1.25rem' }}>
             <div>
               <div className="row row--between" style={{ marginBottom: '0.5rem' }}>
                 <strong style={{ fontSize: 'var(--fs-sm)', color: 'var(--amber-800)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}><FlaskConical size={14} /> Análisis registrados ({d.analisis.length})</strong>
@@ -253,16 +502,44 @@ function DetalleRow({ id, canWrite, cols, nonce, onAddAnalisis, onEditAnalisis, 
                 <span style={{ color: 'var(--text-muted)' }}>Humedad</span><strong className="mono">{num(d.detalle.humedad_pct).toFixed(1)}%</strong>
                 <span style={{ color: 'var(--text-muted)' }}>Ton secas</span><strong className="mono">{num(d.detalle.ton_secas).toFixed(4)} t</strong>
                 <span style={{ color: 'var(--text-muted)' }}>Tenor Au</span><strong className="mono">{num(d.detalle.tenor_au).toFixed(2)} g/t</strong>
-                <span style={{ color: 'var(--text-muted)' }}>Flete</span><strong className="mono">{cop(num(d.detalle.flete))}</strong>
+
+                {/* Precio del material (solo lectura; se registra/edita desde el botón o el modal de material) */}
+                {num(d.detalle.precio_total ?? d.precio_total) > 0 ? (
+                  <>
+                    <span style={SUBHEAD}>Precio del material</span>
+                    {num(d.precio_por_gramo) > 0 && <><span style={{ color: 'var(--text-muted)' }}>Precio por gramo</span><strong className="mono">{cop(num(d.precio_por_gramo))}</strong></>}
+                    {num(d.precio_por_tonelada) > 0 && <><span style={{ color: 'var(--text-muted)' }}>Precio por tonelada</span><strong className="mono">{cop(num(d.precio_por_tonelada))}</strong></>}
+                    <span style={{ color: 'var(--text-muted)' }}>Precio total</span><strong className="mono" style={{ color: '#15803d' }}>{cop(num(d.detalle.precio_total ?? d.precio_total))}</strong>
+                  </>
+                ) : (
+                  <>
+                    <span style={SUBHEAD}>Precio del material</span>
+                    <span style={{ gridColumn: '1 / -1', fontSize: 'var(--fs-xs)', color: 'var(--text-faint)' }}>
+                      {num(d.tenor) > 0 ? 'Sin precio — usa el botón «Precio» de la fila.' : 'Pendiente: registra el análisis (tenor) primero.'}
+                    </span>
+                  </>
+                )}
+
+                {/* Gastos operativos (Flete = Volqueta, se muestra una vez) */}
+                <span style={SUBHEAD}>Gastos operativos</span>
                 <span style={{ color: 'var(--text-muted)' }}>ACPM adelantado</span><strong className="mono">{cop(num(d.detalle.acpm_adelantado))}</strong>
-                <span style={{ color: 'var(--text-muted)' }}>Gastos operativos</span><strong className="mono" style={{ color: '#b45309' }}>{cop(num(d.detalle.gastos_operativos))}</strong>
-                <span style={{ color: 'var(--text-muted)' }}>Valor material</span><strong className="mono" style={{ color: '#15803d' }}>{cop(num(d.detalle.valor_material))}</strong>
+                {num(d.detalle.costo_cargue ?? d.costo_cargue) > 0 && <><span style={{ color: 'var(--text-muted)' }}>Cargue</span><strong className="mono">{cop(num(d.detalle.costo_cargue ?? d.costo_cargue))}</strong></>}
+                {num(d.detalle.costo_bascula ?? d.costo_bascula) > 0 && <><span style={{ color: 'var(--text-muted)' }}>Báscula</span><strong className="mono">{cop(num(d.detalle.costo_bascula ?? d.costo_bascula))}</strong></>}
+                {num(d.detalle.costo_maquila ?? d.costo_maquila) > 0 && <><span style={{ color: 'var(--text-muted)' }}>Maquila</span><strong className="mono">{cop(num(d.detalle.costo_maquila ?? d.costo_maquila))}</strong></>}
+                {num(d.detalle.costo_adicional ?? d.costo_adicional) > 0 && <><span style={{ color: 'var(--text-muted)' }}>Adicional</span><strong className="mono">{cop(num(d.detalle.costo_adicional ?? d.costo_adicional))}</strong></>}
+                {num(d.detalle.costo_volqueta ?? d.costo_volqueta) > 0 && <><span style={{ color: 'var(--text-muted)' }}>Volqueta</span><strong className="mono">{cop(num(d.detalle.costo_volqueta ?? d.costo_volqueta))}</strong></>}
+                <span style={{ color: 'var(--text-muted)' }}>Total gastos oper.</span><strong className="mono" style={{ color: '#b45309' }}>{cop(num(d.detalle.total_costos_operativos ?? d.total_costos_operativos) || num(d.detalle.gastos_operativos))}</strong>
+                <span style={{ color: 'var(--text-muted)' }}>Excedente</span><strong className="mono">{cop(num(d.detalle.excedente ?? d.excedente_calculado))}</strong>
+
+                {/* Resultado */}
+                <span style={SUBHEAD}>Resultado</span>
+                <span style={{ color: 'var(--text-muted)' }}>Valor material</span><strong className="mono" style={{ color: '#15803d' }}>{cop(num(d.detalle.total_material ?? d.total_material) || num(d.detalle.valor_material))}</strong>
                 <span style={{ color: 'var(--text-muted)' }}>Estado pago</span><span>{d.detalle.estado_pago}</span>
                 {d.comentarios && <><span style={{ color: 'var(--text-muted)' }}>Comentarios</span><span>{d.comentarios}</span></>}
               </div>
             </div>
           </div>
-        )}
+          )}
       </td>
     </tr>
   )
@@ -288,6 +565,7 @@ export function EntradasApiPage() {
   const [expanded, setExpanded] = useState<number | null>(null)
   const [llegadaOpen, setLlegadaOpen] = useState(false)
   const [editId, setEditId] = useState<number | null>(null)
+  const [precioRow, setPrecioRow] = useState<EntradaRow | null>(null)
   const [analisisEntrada, setAnalisisEntrada] = useState<number | null>(null)
   const [editAnalisis, setEditAnalisis] = useState<number | null>(null)
   const [detailNonce, setDetailNonce] = useState(0)
@@ -439,6 +717,11 @@ export function EntradasApiPage() {
                             <Button variant="secondary" size="sm" title={num(m.tiene_analisis_cabeza) ? 'Con análisis' : 'Sin análisis — registrar'}
                               icon={<FlaskConical size={14} style={{ color: num(m.tiene_analisis_cabeza) ? 'var(--green-600)' : 'var(--rose-600)' }} />}
                               onClick={() => setAnalisisEntrada(m.id)} />
+                            {num(m.tenor) > 0 && num(m.precio_total) <= 0 && (
+                              <Button variant="secondary" size="sm" title="Registrar precio"
+                                icon={<Coins size={14} style={{ color: 'var(--amber-600)' }} />}
+                                onClick={() => setPrecioRow(m)} />
+                            )}
                           </div>
                         </td>
                       )}
@@ -463,6 +746,7 @@ export function EntradasApiPage() {
       </Card>
 
       <LlegadaModal open={llegadaOpen} editId={editId} onClose={() => setLlegadaOpen(false)} onSaved={refresh} onRequestDelete={requestDeleteEntrada} />
+      <PrecioModal row={precioRow} onClose={() => setPrecioRow(null)} onSaved={refresh} />
       <AnalisisCabezaModal idEntrada={analisisEntrada} onClose={() => setAnalisisEntrada(null)} onSaved={() => { refresh() }} />
       <EditAnalisisModal id={editAnalisis} onClose={() => setEditAnalisis(null)} onSaved={() => { refresh() }} />
       <ConfirmDeleteModal

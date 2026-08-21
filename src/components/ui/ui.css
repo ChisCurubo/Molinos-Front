@@ -326,6 +326,18 @@ button.card-row:hover { border-color: var(--color-primary); box-shadow: var(--sh
 .data-table tfoot tr td { border-top: 2px solid var(--slate-300); border-bottom: none; background: var(--surface-sunken); font-weight: 700; }
 .data-table td.mono { font-family: var(--font-mono); }
 
+/* Variante "fit": tabla a ancho completo sin scroll horizontal (las celdas
+   pueden partir línea en lugar de forzar overflow). */
+.table-wrap--fit { overflow-x: visible; }
+.data-table--fit { table-layout: auto; }
+.data-table--fit th,
+.data-table--fit td { white-space: normal; }
+
+/* Etiqueta E (entrada) / S (salida) para fechas apiladas. */
+.date-tag { display: inline-flex; align-items: center; justify-content: center; width: 1.05rem; height: 1.05rem; border-radius: 4px; font-size: 0.62rem; font-weight: 800; margin-right: 0.4rem; }
+.date-tag--e { background: var(--emerald-100, #d1fae5); color: var(--emerald-700, #047857); }
+.date-tag--s { background: var(--amber-100, #fef3c7); color: var(--amber-700, #b45309); }
+
 /* ---------- Modal ---------- */
 .modal-overlay {
   position: fixed;

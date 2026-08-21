@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { apiError } from '@/api/client'
 import {
   materialApi,
-  type Zona, type Minero, type Mina, type DuenoVolqueta, type Volqueta,
+  type Zona, type Minero, type Mina, type DuenoVolqueta, type Volqueta, type TipoMaterial,
 } from '@/api/material'
 
 interface CacheEntry<T> {
@@ -15,7 +15,7 @@ interface CacheEntry<T> {
   listeners: Set<() => void>
 }
 
-type CatalogKey = 'zonas' | 'mineros' | 'minas' | 'duenos' | 'volquetas'
+type CatalogKey = 'zonas' | 'mineros' | 'minas' | 'duenos' | 'volquetas' | 'tipos'
 
 const store: Record<CatalogKey, CacheEntry<unknown>> = {
   zonas:     { data: null, promise: null, listeners: new Set() },
@@ -23,6 +23,7 @@ const store: Record<CatalogKey, CacheEntry<unknown>> = {
   minas:     { data: null, promise: null, listeners: new Set() },
   duenos:    { data: null, promise: null, listeners: new Set() },
   volquetas: { data: null, promise: null, listeners: new Set() },
+  tipos:     { data: null, promise: null, listeners: new Set() },
 }
 
 const fetchers: Record<CatalogKey, () => Promise<unknown[]>> = {
@@ -31,6 +32,7 @@ const fetchers: Record<CatalogKey, () => Promise<unknown[]>> = {
   minas:     () => materialApi.getMinas(),
   duenos:    () => materialApi.getDuenos(),
   volquetas: () => materialApi.getVolquetas(),
+  tipos:     () => materialApi.getTiposMaterial(),
 }
 
 function notify(key: CatalogKey) {
@@ -53,14 +55,16 @@ function useCatalog<T>(key: CatalogKey) {
   const [loading, setLoading] = useState(entry.data === null)
   const [error, setError] = useState<string | null>(null)
 
-  const run = useCallback(() => {
+  // showLoading=false: re-consulta en segundo plano manteniendo en pantalla
+  // los datos previos (tras crear/editar/borrar), para que la tabla no parpadee.
+  const run = useCallback((showLoading = true) => {
     setError(null)
     if (entry.data !== null) {
       setData(entry.data)
       setLoading(false)
       return
     }
-    setLoading(true)
+    if (showLoading) setLoading(true)
     if (!entry.promise) {
       entry.promise = (fetchers[key]() as Promise<T[]>)
         .then(res => { entry.data = res; return res })
@@ -73,8 +77,13 @@ function useCatalog<T>(key: CatalogKey) {
 
   useEffect(() => {
     const sync = () => {
-      setData(entry.data)
-      setLoading(entry.data === null && !!entry.promise)
+      if (entry.data !== null) {
+        setData(entry.data)
+        setLoading(false)
+      } else {
+        // Caché invalidada: volver a consultar sin ocultar lo ya visible.
+        run(false)
+      }
     }
     entry.listeners.add(sync)
     run()
@@ -91,3 +100,4 @@ export const useMineros  = () => useCatalog<Minero>('mineros')
 export const useMinas    = () => useCatalog<Mina>('minas')
 export const useDuenos   = () => useCatalog<DuenoVolqueta>('duenos')
 export const useVolquetas = () => useCatalog<Volqueta>('volquetas')
+export const useTiposMaterial = () => useCatalog<TipoMaterial>('tipos')

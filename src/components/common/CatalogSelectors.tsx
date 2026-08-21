@@ -5,7 +5,7 @@
 import { Select } from '@/components/ui'
 import { num } from '@/api/material'
 import {
-  useMinas, useMineros, useZonas, useVolquetas, useDuenos,
+  useMinas, useMineros, useZonas, useVolquetas, useDuenos, useTiposMaterial,
 } from '@/hooks/useMaterialCatalogos'
 
 interface BaseSelectorProps {
@@ -101,6 +101,22 @@ export function VolquetaSelect({ label = 'Volqueta', value, onChange, placeholde
         value: String(v.id),
         label: `${v.placa}${v.dueno ?? v.dueno_nombre ? ` · ${v.dueno ?? v.dueno_nombre}` : ''}`,
       }))}
+    />
+  )
+}
+
+// ── Tipo de material ─────────────────────────────────────────────────────────
+export function TipoMaterialSelect({ label = 'Tipo de material', value, onChange, placeholder = '— Seleccionar tipo —', required, disabled }: BaseSelectorProps) {
+  const { data, loading, error } = useTiposMaterial()
+  return (
+    <Select
+      label={label} required={required}
+      disabled={disabled || loading}
+      value={value === '' ? '' : String(value)}
+      onChange={useSelectHandler(onChange)}
+      placeholder={loading ? 'Cargando…' : placeholder}
+      error={error ?? undefined}
+      options={data.map(t => ({ value: String(t.id), label: t.nombre }))}
     />
   )
 }

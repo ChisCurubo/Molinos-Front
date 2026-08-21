@@ -67,6 +67,9 @@ storybook-static/
 # ── Graphify (knowledge graph local, no versionar) ────────
 graphify-out/
 
+# ── Docs de trabajo local (notas / pendientes, no versionar) ──
+docs/
+
 # ── Playwright ────────────────────────────────────────────
 playwright-report/
 test-results/

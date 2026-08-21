@@ -133,6 +133,10 @@ export interface MaterialRow {
   lote: string | null
   valor_flete?: number  // peso × tarifaZona, calculado al registrar
   acpm?: number         // adelanto de ACPM entregado (COP)
+  // Fase 3 · precio digitado por entrada (se llena al confirmar el precio)
+  precio_por_gramo?: number
+  precio_por_tonelada?: number
+  precio_total?: number
 }
 
 export interface LoteRow {

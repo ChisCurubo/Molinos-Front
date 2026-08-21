@@ -331,6 +331,81 @@ export interface PrecioUpdatePayload {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// 2.7 · TARIFAS DE FLETE POR ZONA (Tarifa_Zona)
+// CRUD de la tarifa base por tonelada de cada zona. Al crear una activa, el
+// backend cierra la tarifa vigente anterior de esa zona (una activa por zona).
+// El flete de cada entrada (costo_volqueta) se calcula aparte al editar la
+// entrada; esta pantalla solo administra las tarifas base.
+// ════════════════════════════════════════════════════════════════════════════
+
+export interface TarifaZona {
+  id: number
+  id_zona: number
+  zona: string | null
+  valor_tonelada: Dec
+  vigente_desde: string | null
+  vigente_hasta: string | null
+  activo: boolean | number
+  created_at: string
+}
+
+export interface TarifaZonaCreatePayload {
+  id_zona: number
+  valor_tonelada: number
+  vigente_desde?: string
+  vigente_hasta?: string
+  activo?: boolean
+}
+
+/** Editar tarifa (parcial). Acepta alias `tarifa` por `valor_tonelada`. */
+export interface TarifaZonaUpdatePayload {
+  id_zona?: number
+  valor_tonelada?: number
+  tarifa?: number
+  vigente_desde?: string
+  vigente_hasta?: string
+  activo?: boolean
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 2.8 · PRECIOS DE MATERIAL (Precio_Material) — tabla referencial
+// CRUD de consulta; NO afecta cálculos. El precio de compra se asigna manual
+// en el flujo de entrada; esta pantalla es solo administración/referencia.
+// ════════════════════════════════════════════════════════════════════════════
+
+export interface PrecioMaterial {
+  id: number
+  id_minero: number | null
+  minero: string | null
+  id_zona: number | null
+  zona: string | null
+  metodo: MetodoCalculo
+  precio_por_gramo: Dec | null
+  precio_por_tonelada: Dec | null
+  intervalo_tenor_min: Dec | null
+  intervalo_tenor_max: Dec | null
+  fecha_inicio: string
+  fecha_fin: string | null
+  activo: boolean | number
+  created_at: string
+}
+
+export interface PrecioMaterialCreatePayload {
+  id_minero?: number
+  id_zona?: number
+  metodo: MetodoCalculo
+  precio_por_gramo?: number
+  precio_por_tonelada?: number
+  intervalo_tenor_min?: number
+  intervalo_tenor_max?: number
+  fecha_inicio: string
+  fecha_fin?: string
+  activo?: boolean
+}
+
+export type PrecioMaterialUpdatePayload = Partial<PrecioMaterialCreatePayload>
+
+// ════════════════════════════════════════════════════════════════════════════
 // 3 · MATERIAL (entradas / llegadas)
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -351,6 +426,8 @@ export interface EntradaCreatePayload {
   id_tipo_material: number
   fecha_llegada?: string
   peso_llegada_planta: number
+  /** ACPM adelantado al conductor (COP); se descuenta del flete al pagar. */
+  acpm_adelantado?: number
   comentarios?: string
   nueva_volqueta?: NuevaVolquetaInline
 }
@@ -362,7 +439,64 @@ export interface EntradaUpdatePayload {
   id_tipo_material?: number
   fecha_llegada?: string
   peso_llegada_planta?: number
+  acpm_adelantado?: number
   comentarios?: string
+}
+
+/** PATCH precio de la entrada (Fase 3: se digita el precio pactado por entrada).
+ *  Enviar SOLO una de las dos claves según el método de pago. */
+export interface EntradaPrecioPayload {
+  precio_por_gramo?: number
+  precio_por_tonelada?: number
+}
+
+// ─── Gastos operativos (columnas de la entrada) ──────────────────────────────
+/** GET /entradas/:id/gastos-operativos — los 5 costos + totales recalculados.
+ *  total_material = precio_total + total_costos_operativos. */
+export interface GastosOperativos {
+  costo_cargue: Dec | null
+  costo_bascula: Dec | null
+  costo_maquila: Dec | null
+  costo_adicional: Dec | null
+  costo_volqueta: Dec | null
+  total_costos_operativos: Dec | null
+  total_material: Dec | null
+}
+
+/** PATCH /entradas/:id/gastos-operativos — manda solo los costos que cambian. */
+export interface GastosOperativosPayload {
+  costo_cargue?: number
+  costo_bascula?: number
+  costo_maquila?: number
+  costo_adicional?: number
+  costo_volqueta?: number
+}
+
+// ─── Excedente (tabla aparte, upsert 1:1) ────────────────────────────────────
+/** GET /entradas/:id/excedente — el registro actual o `null` si no existe. */
+export interface Excedente {
+  valor: Dec | null
+  distribuido: Dec | null
+  saldo: Dec | null
+  estado: string | null
+  fecha_calculo: string | null
+  notas: string | null
+}
+
+/** PUT /entradas/:id/excedente — crea o actualiza (no toca total_material).
+ *  `excedente` es el FACTOR multiplicador (número por el que el backend
+ *  multiplica las ton secas), NO el valor total ya calculado. */
+export interface ExcedentePayload {
+  excedente: number
+  fecha_calculo?: string
+  notas?: string
+}
+
+// ─── Tipos de material (selector cacheable) ──────────────────────────────────
+export interface TipoMaterial {
+  id: number
+  nombre: string
+  descripcion: string | null
 }
 
 export interface EntradasQuery {
@@ -392,6 +526,10 @@ export interface EntradaRow {
   estado: EstadoEntrada
   estado_pago_flete: EstadoPagoFlete
   tiene_analisis_cabeza: boolean | number
+  /** Opcional: el backend puede incluirlo en el listado. */
+  acpm_adelantado?: Dec | null
+  zona?: string | null
+  flete?: Dec | null
 }
 
 export interface AnalisisResumen {
@@ -420,6 +558,16 @@ export interface EntradaDetalleResumen {
   gastos_operativos: Dec
   valor_material: Dec
   estado_pago: string
+  // Desglose que el backend ahora incluye en data.detalle (Fase 3).
+  costo_cargue?: Dec | null
+  costo_bascula?: Dec | null
+  costo_maquila?: Dec | null
+  costo_adicional?: Dec | null
+  costo_volqueta?: Dec | null
+  total_costos_operativos?: Dec | null
+  precio_total?: Dec | null
+  excedente?: Dec | null
+  total_material?: Dec | null
 }
 
 export interface EntradaDetalle {
@@ -443,6 +591,7 @@ export interface EntradaDetalle {
   dueno_id: number | null
   dueno: string | null
   dueno_alias: string | null
+  tipo_material_id: number | null
   tipo_material: string | null
   peso_llegada_planta: Dec
   porcentaje_humedad: Dec | null
@@ -450,7 +599,6 @@ export interface EntradaDetalle {
   total_material_seco: Dec | null
   tenor: Dec | null
   total_gramos: Dec | null
-  id_precio: number | null
   precio_por_gramo: Dec | null
   precio_por_tonelada: Dec | null
   precio_total: Dec | null
@@ -541,6 +689,447 @@ export interface AnalisisUpdatePayload {
   numero_analisis?: string
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// 5 · VIAJES DE AGUA (agua planta)
+// El valor_total lo calcula el backend: valor_viaje * cantidad_viajes - acpm.
+// ════════════════════════════════════════════════════════════════════════════
+
+export interface AguaRangoQuery {
+  desde: string // YYYY-MM-DD
+  hasta: string // YYYY-MM-DD
+}
+
+/** Campos de texto del alta (se envían como multipart junto con la foto). */
+export interface AguaCreatePayload {
+  id_dueno_volqueta: number
+  fecha: string
+  valor_viaje: number
+  cantidad_viajes: number
+  acpm?: number
+  // El comprobante NO va aquí: se adjunta como archivo (foto) y el servidor
+  // lo sube a MinIO/blob y setea `comprobante_url` internamente.
+}
+
+/** Editar: no cambia el vehículo (ya conocido) ni el comprobante. */
+export interface AguaUpdatePayload {
+  fecha?: string
+  valor_viaje?: number
+  cantidad_viajes?: number
+  acpm?: number
+}
+
+/** Fila del historial de viajes de agua. */
+export interface AguaViaje {
+  id: number
+  id_dueno_volqueta: number | null
+  fecha: string
+  dueno: string | null
+  dueno_alias: string | null
+  valor_viaje: Dec
+  cantidad_viajes: number
+  acpm: Dec | null
+  valor_total: Dec
+  comprobante_url: string | null
+}
+
+/** Resumen agrupado por dueño (liquidación), con la lista de viajes embebida. */
+export interface AguaResumenDueno {
+  id_dueno: number
+  dueno: string
+  dueno_alias: string | null
+  total_registros: number
+  total_viajes: number
+  total_pagar: Dec
+  /** Viajes del dueño dentro del período consultado. */
+  viajes: AguaViaje[]
+}
+
+/** El detalle de un dueño tiene la misma forma que su fila de resumen. */
+export type AguaDuenoDetalle = AguaResumenDueno
+
+// ─── Reporte mensual (agrupado por dueño con arrastre de saldo) ───────────────
+export interface AguaReporteViaje {
+  id: number
+  fecha: string
+  cantidad_viajes: number
+  valor_viaje: Dec
+  bruto: Dec        // valor_viaje * cantidad_viajes
+  acpm: Dec
+  neto: Dec         // = valor_total (bruto - acpm)
+}
+
+export interface AguaReporteResumen {
+  total_viajes: number
+  bruto: Dec
+  acpm: Dec
+  neto_mes: Dec
+  saldo_inicio: Dec // arrastre de netos de meses anteriores
+  abonado: Dec      // 0 por ahora (sin abonos)
+  saldo_fin: Dec    // saldo_inicio + neto_mes - abonado
+}
+
+export interface AguaReporteDueno {
+  id_dueno: number
+  dueno: string
+  alias: string | null
+  resumen: AguaReporteResumen
+  viajes: AguaReporteViaje[]
+}
+
+export interface AguaReporteMensual {
+  periodo: { desde: string; hasta: string }
+  duenos: AguaReporteDueno[]
+}
+
+export interface AguaReporteQuery {
+  mes?: number
+  anio?: number
+  desde?: string
+  hasta?: string
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 6 · PROCESAMIENTO (concentrado) · INVENTARIO · VIAJES DE MATERIAL
+// GET de lectura (listados con filtros, detalle, trazabilidad y resúmenes).
+// Ver docs/endpoints_pendientes_material.md. Decimales llegan como string.
+// ════════════════════════════════════════════════════════════════════════════
+
+export type EstadoLote = 'en_proceso' | 'en_canoa' | 'parcialmente_enviado' | 'enviado_completo'
+
+// ─── 6.1 Inventario ───────────────────────────────────────────────────────────
+export interface InvCrudoRow {
+  id: number
+  numero_volqueta: number
+  id_mina: number | null
+  mina: string | null
+  id_tipo_material: number | null
+  tipo_material: string | null
+  fecha_llegada: string
+  toneladas_humedo: Dec
+  total_material_seco: Dec | null
+  porcentaje_humedad: Dec | null
+  tenor: Dec | null
+  estado: EstadoEntrada
+  ya_procesado_seco: Dec | null
+  disponible_seco: Dec | null
+  // Opcionales: el backend puede agregarlos al endpoint; si no vienen, el front
+  // los completa (pagado vía getEntradas, au real vía `tenor`).
+  au_real?: Dec | null
+  ag_real?: Dec | null
+  tenor_falso?: Dec | null
+  pagado_material?: Dec | null
+}
+
+export interface InvConcentradoRow {
+  id: number
+  codigo: string
+  estado: EstadoLote
+  ubicacion_canoa: string | null
+  fecha_inicio: string
+  fecha_fin: string | null
+  porcentaje_humedad: Dec | null
+  toneladas_humedo: Dec | null
+  toneladas_seco: Dec | null
+  toneladas_disponibles: Dec
+  material_seco_procesado: Dec | null
+  maquila_total: Dec | null
+  precio_maquila_por_ton: Dec | null
+  tenor_au: Dec | null
+  tenor_ag: Dec | null
+  // Opcionales: si el backend los agrega al endpoint se usan directo; si no, el
+  // front toma las minas del detalle del lote (materiales[].mina).
+  pagado_material?: Dec | null
+  minas?: string[] | string | null
+}
+
+export interface InventarioResumen {
+  lotes_en_canoa: number
+  concentrado_humedo_disponible: Dec
+  concentrado_maquila_total: Dec
+  entradas_sin_lote: number
+  crudo_humedo_total: Dec
+  crudo_seco_total: Dec
+}
+
+// ─── 6.2 Procesamiento / lotes de concentrado ─────────────────────────────────
+export interface LoteConcentradoRow {
+  id: number
+  codigo: string
+  estado: EstadoLote
+  fecha_inicio: string
+  fecha_fin: string | null
+  hizo_molienda: boolean | number
+  hizo_flotacion: boolean | number
+  hizo_relave: boolean | number
+  hizo_filtroprensa: boolean | number
+  material_seco_procesado: Dec | null
+  toneladas_humedo: Dec | null
+  porcentaje_humedad: Dec | null
+  toneladas_seco: Dec | null
+  toneladas_disponibles: Dec
+  ubicacion_canoa: string | null
+  precio_maquila_por_ton: Dec | null
+  maquila_total: Dec | null
+  comentarios: string | null
+  num_materiales: number
+  numero_analisis: string | null
+  au_gr_x_ton: Dec | null
+  ag_gr_x_ton: Dec | null
+  au_concentrado: Dec | null
+  ag_concentrado: Dec | null
+}
+
+export interface LoteMaterialVinculado {
+  id: number
+  numero_volqueta: number
+  mina: string | null
+  fecha_llegada: string
+  peso_llegada_planta: Dec
+  porcentaje_humedad: Dec | null
+  total_material_seco: Dec | null
+  tenor: Dec | null
+  toneladas_aportadas: Dec | null
+  toneladas_seco_aportadas: Dec | null
+}
+
+export interface LoteConcentradoDetalle extends LoteConcentradoRow {
+  created_at: string
+  updated_at: string
+  materiales: LoteMaterialVinculado[]
+}
+
+/** Análisis del concentrado de un lote (tenor real). */
+export interface AnalisisConcentrado {
+  id: number
+  tipo?: string
+  numero_analisis: string
+  toneladas_secas: Dec | null
+  au_gr_x_ton: Dec | null
+  ag_gr_x_ton: Dec | null
+  au_concentrado: Dec | null
+  ag_concentrado: Dec | null
+  porcentaje_humedad: Dec | null
+}
+
+/** Fila de la pestaña "Procesamiento material" (materiales vinculados a lotes). */
+export interface ProcesamientoMaterialRow {
+  id_entrada: number
+  codigo_lote: string | null
+  id_lote: number | null
+  estado_lote: EstadoLote | null
+  numero_volqueta: number
+  mina: string | null
+  fecha_llegada: string
+  peso_llegada_planta: Dec
+  porcentaje_humedad: Dec | null
+  total_material_seco: Dec | null
+  tenor: Dec | null
+  analisis: AnalisisConcentrado[]
+}
+
+export interface ConcentradoResumen {
+  en_proceso: number
+  en_canoa: number
+  parcialmente_enviado: number
+  enviado_completo: number
+  toneladas_disponibles_total: Dec
+}
+
+export interface ConcentradoQuery {
+  codigo?: string
+  estado?: EstadoLote
+  desde?: string
+  hasta?: string
+  limit?: number
+  offset?: number
+}
+
+export interface ProcesamientoQuery {
+  id_lote?: number
+  codigo_lote?: string
+  id_mina?: number
+  desde?: string
+  hasta?: string
+  estado_lote?: EstadoLote
+  limit?: number
+  offset?: number
+}
+
+// ─── Escrituras de concentrado (payloads) ─────────────────────────────────────
+export interface ConcentradoCreatePayload {
+  codigo: string
+  fecha_inicio: string
+}
+
+export interface ConcentradoProcesarPayload {
+  id_entradas: number[]
+  toneladas_procesadas_seco: number
+}
+
+export interface ConcentradoCerrarPayload {
+  toneladas_humedo: number
+  porcentaje_humedad: number
+  fecha_fin: string
+  hizo_molienda?: boolean
+  hizo_flotacion?: boolean
+  hizo_relave?: boolean
+  hizo_filtroprensa?: boolean
+  ubicacion_canoa?: string
+}
+
+export interface ConcentradoUpdatePayload {
+  codigo?: string
+  fecha_inicio?: string
+  comentarios?: string
+  hizo_molienda?: boolean
+  hizo_flotacion?: boolean
+  hizo_relave?: boolean
+  hizo_filtroprensa?: boolean
+  ubicacion_canoa?: string
+  precio_maquila_por_ton?: number
+}
+
+/** Análisis del concentrado (POST): se hace después de cerrar el lote. */
+export interface AnalisisConcentradoPayload {
+  id_material_concentrado: number
+  numero_analisis?: string
+  porcentaje_humedad: number
+  au_concentrado: number
+  ag_concentrado?: number
+}
+
+// ─── 6.3 Viajes de material ───────────────────────────────────────────────────
+export interface ViajeMaterialLinea {
+  id: number
+  id_viaje: number
+  id_material_concentrado: number
+  codigo_lote: string | null
+  concepto: string | null
+  concentrado_humedo: Dec
+  porcentaje_humedad: Dec | null
+  concentrado_seco: Dec
+  costo_maquila: Dec | null
+  valor_total: Dec | null
+  au_gr_x_ton: Dec | null
+  ag_gr_x_ton: Dec | null
+  au_gramos: Dec | null
+  ag_gramos: Dec | null
+}
+
+export interface ViajeMaterial {
+  id: number
+  numero_viaje: string
+  fecha: string
+  comentarios: string | null
+  total_concentrado_humedo: Dec
+  total_concentrado_seco: Dec
+  maquila_total: Dec
+  valor_material_total: Dec
+  au_gramos_total: Dec
+  ag_gramos_total: Dec
+  lineas: ViajeMaterialLinea[]
+}
+
+export interface ViajeMaterialResumen {
+  total_viajes: number
+  toneladas_humedo: Dec
+  toneladas_seco: Dec
+  maquila_total: Dec
+  valor_material_total: Dec
+  au_gramos_total: Dec
+  ag_gramos_total: Dec
+  au_promedio_viaje: Dec
+  ag_promedio_viaje: Dec
+}
+
+/** Trazabilidad: en qué viajes salió un lote y cuánto metal llevó. */
+export interface ViajeLoteTrace {
+  id_viaje: number
+  numero_viaje: string
+  fecha: string
+  concentrado_humedo: Dec
+  concentrado_seco: Dec
+  au_gramos: Dec | null
+  ag_gramos: Dec | null
+}
+
+// ─── Trazabilidad completa (viaje → lotes → materiales de origen) ─────────────
+/** Material de origen que aportó a un lote, con su aporte proporcional. */
+export interface TrazaMaterial {
+  id_entrada: number
+  numero_volqueta: number
+  mina: string | null
+  minero: string | null
+  fecha_llegada: string
+  tenor: Dec | null
+  total_material_seco: Dec | null
+  toneladas_aportadas: Dec | null
+  toneladas_seco_aportadas: Dec | null
+  concentrado_proporcional: Dec | null // cuánto concentrado aportó ese material
+  maquila_proporcional: Dec | null
+  porcentaje_aporte: number | null      // % sobre el seco del lote
+}
+
+/** Línea (lote) del viaje con sus materiales de origen. */
+export interface TrazaLinea {
+  id_linea: number
+  id_lote: number
+  codigo_lote: string | null
+  estado_lote: EstadoLote | null
+  concentrado_humedo: Dec
+  concentrado_seco: Dec
+  au_gramos: Dec | null
+  ag_gramos: Dec | null
+  materiales: TrazaMaterial[]
+}
+
+/** `GET /material/viajes/:id/trazabilidad` — viaje → lotes → materiales. */
+export interface ViajeTrazabilidad {
+  id_viaje: number
+  numero_viaje: string
+  fecha: string
+  comentarios: string | null
+  lineas: TrazaLinea[]
+}
+
+/** `GET /material/viajes/linea/:id/trazabilidad` — una línea → su lote y materiales. */
+export interface LineaTrazabilidad {
+  id_linea: number
+  id_viaje: number
+  numero_viaje: string
+  fecha: string
+  id_lote: number
+  codigo_lote: string | null
+  estado_lote: EstadoLote | null
+  concentrado_despachado_humedo: Dec
+  concentrado_despachado_seco: Dec
+  materiales: TrazaMaterial[]
+}
+
+export interface ViajesMaterialQuery {
+  desde?: string
+  hasta?: string
+  numero_viaje?: string
+  id_lote?: number
+  codigo_lote?: string
+  limit?: number
+  offset?: number
+}
+
+// ─── Escrituras de viajes (payloads) ──────────────────────────────────────────
+export interface ViajeCreatePayload {
+  numero_viaje: string
+  fecha: string
+  comentarios?: string
+}
+
+export interface ViajeLineaPayload {
+  id_material_concentrado: number
+  total_concentrado_humedo?: number
+  valor_total?: number
+  concepto?: string
+}
+
 // ─── Helper de querystring ───────────────────────────────────────────────────
 function qs(params: Record<string, string | number | boolean | undefined>): string {
   const q = new URLSearchParams()
@@ -612,6 +1201,20 @@ export const materialApi = {
   createPreciosLote: (body: PrecioLotePayload) => apiPost<CreatedResponse>('/material/precios/lote', body),
   updatePrecio: (id: number, body: PrecioUpdatePayload) => apiPut<CreatedResponse>(`/material/precios/${id}`, body),
 
+  // ── 2.7 Tarifas de flete por zona (Tarifa_Zona) ──────────────────────────────
+  getTarifasZona: () => apiFetch<TarifaZona[]>('/material/mina/tarifa-zona'),
+  getTarifaZona: (id: number) => apiFetch<TarifaZona>(`/material/mina/tarifa-zona/${id}`),
+  createTarifaZona: (body: TarifaZonaCreatePayload) => apiPost<TarifaZona>('/material/mina/tarifa-zona', body),
+  updateTarifaZona: (id: number, body: TarifaZonaUpdatePayload) => apiPut<TarifaZona>(`/material/mina/tarifa-zona/${id}`, body),
+  deleteTarifaZona: (id: number) => apiDelete<boolean>(`/material/mina/tarifa-zona/${id}`),
+
+  // ── 2.8 Precios de material (Precio_Material, referencial) ────────────────────
+  getPreciosMaterial: () => apiFetch<PrecioMaterial[]>('/material/mina/precio-material'),
+  getPrecioMaterial: (id: number) => apiFetch<PrecioMaterial>(`/material/mina/precio-material/${id}`),
+  createPrecioMaterial: (body: PrecioMaterialCreatePayload) => apiPost<PrecioMaterial>('/material/mina/precio-material', body),
+  updatePrecioMaterial: (id: number, body: PrecioMaterialUpdatePayload) => apiPut<PrecioMaterial>(`/material/mina/precio-material/${id}`, body),
+  deletePrecioMaterial: (id: number) => apiDelete<boolean>(`/material/mina/precio-material/${id}`),
+
   // ── 3 Entradas ───────────────────────────────────────────────────────────────
   createEntrada: (body: EntradaCreatePayload) => apiPost<CreatedResponse>('/material/entrada', body),
   getEntradas: (query?: EntradasQuery) =>
@@ -629,6 +1232,21 @@ export const materialApi = {
     apiPatch<{ cancelled: boolean }>(`/material/entradas/${id}/cancelar`, { motivo }),
   setEstadoEntrada: (id: number, estado: EstadoEntrada) =>
     apiPatch<{ updated: boolean }>(`/material/entradas/${id}/estado`, { estado }),
+  // Devuelve la entrada ya recalculada (precio_total, total_material y el
+  // precio contrario en null). El backend valida: 400 (ambos/ninguno o ≤ 0),
+  // 404 (no existe), 409 (cancelada o sin análisis / Fase 2 incompleta).
+  setPrecioEntrada: (id: number, body: EntradaPrecioPayload) =>
+    apiPatch<EntradaDetalle>(`/material/entradas/${id}/precio`, body),
+  // Gastos operativos (los 5 costo_* + totales recalculados).
+  getGastosOperativos: (id: number) => apiFetch<GastosOperativos>(`/material/entradas/${id}/gastos-operativos`),
+  updateGastosOperativos: (id: number, body: GastosOperativosPayload) =>
+    apiPatch<GastosOperativos>(`/material/entradas/${id}/gastos-operativos`, body),
+  // Excedente (tabla aparte, upsert 1:1). El GET puede devolver null.
+  getExcedente: (id: number) => apiFetch<Excedente | null>(`/material/entradas/${id}/excedente`),
+  putExcedente: (id: number, body: ExcedentePayload) =>
+    apiPut<Excedente>(`/material/entradas/${id}/excedente`, body),
+  // Tipos de material (selector cacheable).
+  getTiposMaterial: () => apiFetch<TipoMaterial[]>('/material/tipos-material'),
   getEntradasStats: () => apiFetch<EntradasStats>('/material/entradas/stats'),
   getEntradasPendientesAnalisis: () => apiFetch<EntradaPendienteAnalisis[]>('/material/entradas/pendientes-analisis'),
   // Listados alternos (mismo shape que la lista)
@@ -652,4 +1270,74 @@ export const materialApi = {
   getAnalisisPorMinero: (id: number) => apiFetch<AnalisisResumen[]>(`/material/analisis/minero/${id}`),
   getAnalisisPorMina: (id: number) => apiFetch<AnalisisResumen[]>(`/material/analisis/mina/${id}`),
   getAnalisisPorFecha: (fecha: string) => apiFetch<AnalisisResumen[]>(`/material/analisis/fecha/${fecha}`),
+
+  // ── 5 Viajes de agua ─────────────────────────────────────────────────────────
+  // Alta con multipart/form-data: campos de texto + archivo `comprobante` (foto).
+  createAgua: (form: FormData) => apiPost<CreatedResponse>('/material/agua', form),
+  updateAgua: (id: number, body: AguaUpdatePayload) => apiPut<CreatedResponse>(`/material/agua/${id}`, body),
+  getAguaViajes: (q: AguaRangoQuery) =>
+    apiFetch<AguaViaje[]>(`/material/agua/viajes${qs({ desde: q.desde, hasta: q.hasta })}`),
+  getAguaResumen: (q: AguaRangoQuery) =>
+    apiFetch<AguaResumenDueno[]>(`/material/agua/resumen${qs({ desde: q.desde, hasta: q.hasta })}`),
+  getAguaDueno: (idDueno: number) => apiFetch<AguaDuenoDetalle>(`/material/agua/dueno/${idDueno}`),
+  getAgua: (id: number) => apiFetch<AguaViaje>(`/material/agua/${id}`),
+  getAguaReporteMensual: (q: AguaReporteQuery) =>
+    apiFetch<AguaReporteMensual>(`/material/agua/reporte-mensual${qs({ mes: q.mes, anio: q.anio, desde: q.desde, hasta: q.hasta })}`),
+
+  // ── 6.1 Inventario ─────────────────────────────────────────────────────────
+  getInventarioCrudo: () => apiFetch<InvCrudoRow[]>('/material/inventario/crudo'),
+  getInventarioConcentrado: () => apiFetch<InvConcentradoRow[]>('/material/inventario/concentrado'),
+  getInventarioLote: (id: number) => apiFetch<LoteConcentradoDetalle>(`/material/inventario/lote/${id}`),
+  getInventarioResumen: () => apiFetch<InventarioResumen>('/material/inventario/resumen'),
+
+  // ── 6.2 Procesamiento / lotes de concentrado ─────────────────────────────────
+  getConcentradoLotes: (q?: ConcentradoQuery) =>
+    apiFetch<LoteConcentradoRow[]>(`/material/concentrado${qs({
+      codigo: q?.codigo, estado: q?.estado, desde: q?.desde, hasta: q?.hasta,
+      limit: q?.limit ?? 1000, offset: q?.offset,
+    })}`),
+  getConcentrado: (id: number) => apiFetch<LoteConcentradoDetalle>(`/material/concentrado/${id}`),
+  getConcentradoProcesamiento: (q?: ProcesamientoQuery) =>
+    apiFetch<ProcesamientoMaterialRow[]>(`/material/concentrado/procesamiento${qs({
+      id_lote: q?.id_lote, codigo_lote: q?.codigo_lote, id_mina: q?.id_mina,
+      desde: q?.desde, hasta: q?.hasta, estado_lote: q?.estado_lote,
+      limit: q?.limit ?? 2000, offset: q?.offset,
+    })}`),
+  getConcentradoResumen: () => apiFetch<ConcentradoResumen>('/material/concentrado/resumen'),
+  getAnalisisConcentrado: (idLote: number) => apiFetch<AnalisisConcentrado[]>(`/material/analisis/concentrado/${idLote}`),
+
+  // Escrituras de concentrado
+  createConcentrado: (body: ConcentradoCreatePayload) => apiPost<CreatedResponse>('/material/concentrado', body),
+  procesarConcentrado: (id: number, body: ConcentradoProcesarPayload) =>
+    apiPost<CreatedResponse>(`/material/concentrado/${id}/procesar`, body),
+  cerrarConcentrado: (id: number, body: ConcentradoCerrarPayload) =>
+    apiPut<CreatedResponse>(`/material/concentrado/${id}/cerrar`, body),
+  updateConcentrado: (id: number, body: ConcentradoUpdatePayload) =>
+    apiPut<CreatedResponse>(`/material/concentrado/${id}`, body),
+  deleteConcentradoMaterial: (id: number, idEntrada: number) =>
+    apiDelete<CreatedResponse>(`/material/concentrado/${id}/material/${idEntrada}`),
+  deleteConcentrado: (id: number) => apiDelete<CreatedResponse>(`/material/concentrado/${id}`),
+  createAnalisisConcentrado: (body: AnalisisConcentradoPayload) => apiPost<CreatedResponse>('/material/analisis', body),
+
+  // ── 6.3 Viajes de material ───────────────────────────────────────────────────
+  getViajesMaterial: (q?: ViajesMaterialQuery) =>
+    apiFetch<ViajeMaterial[]>(`/material/viajes${qs({
+      desde: q?.desde, hasta: q?.hasta, numero_viaje: q?.numero_viaje,
+      id_lote: q?.id_lote, codigo_lote: q?.codigo_lote,
+      limit: q?.limit ?? 1000, offset: q?.offset,
+    })}`),
+  getViajeMaterial: (id: number) => apiFetch<ViajeMaterial>(`/material/viajes/${id}`),
+  getViajesMaterialResumen: (q?: { desde?: string; hasta?: string }) =>
+    apiFetch<ViajeMaterialResumen>(`/material/viajes/resumen${qs({ desde: q?.desde, hasta: q?.hasta })}`),
+  getViajesPorLote: (idLote: number) => apiFetch<ViajeLoteTrace[]>(`/material/viajes/lote/${idLote}`),
+  getViajeTrazabilidad: (id: number) => apiFetch<ViajeTrazabilidad>(`/material/viajes/${id}/trazabilidad`),
+  getLineaTrazabilidad: (idLinea: number) => apiFetch<LineaTrazabilidad>(`/material/viajes/linea/${idLinea}/trazabilidad`),
+
+  // Escrituras de viajes
+  createViaje: (body: ViajeCreatePayload) => apiPost<CreatedResponse>('/material/viajes', body),
+  addViajeLinea: (idViaje: number, body: ViajeLineaPayload) =>
+    apiPost<CreatedResponse>(`/material/viajes/${idViaje}/lineas`, body),
+  deleteViajeLinea: (idViaje: number, idLinea: number) =>
+    apiDelete<CreatedResponse>(`/material/viajes/${idViaje}/lineas/${idLinea}`),
+  deleteViaje: (id: number) => apiDelete<CreatedResponse>(`/material/viajes/${id}`),
 }
