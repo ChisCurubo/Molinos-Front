@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, Package, Layers, RefreshCw } from 'lucide-react'
+import { ArrowRight, ChevronDown, ChevronRight, Package, Layers, RefreshCw } from 'lucide-react'
 import { Button, Card, KpiTile } from '@/components/ui'
 import { PageHeader } from '@/components/common/Page'
 import { apiError } from '@/api/client'
 import { formatCOP } from '@/utils/format'
 import {
   materialApi, num,
-  type InvCrudoRow, type InvConcentradoRow, type EntradaRow,
+  type InvCrudoRow, type InvConcentradoRow, type EntradaRow, type InventarioResumen,
+  type InventarioLoteResumen,
 } from '@/api/material'
 
 const cop = formatCOP
@@ -25,13 +26,31 @@ export function InventarioApiPage() {
 
   const [crudo, setCrudo] = useState<InvCrudoRow[]>([])
   const [concentrado, setConcentrado] = useState<InvConcentradoRow[]>([])
+  const [resumen, setResumen] = useState<InventarioResumen | null>(null)
   const [entradaMap, setEntradaMap] = useState<Record<number, EntradaRow>>({})
   const [minasMap, setMinasMap] = useState<Record<number, string[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Fila de concentrado expandida → resumen de inventario del lote (endpoint /inventario/lote/:id).
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+  const [loteResumen, setLoteResumen] = useState<Record<number, InventarioLoteResumen | null>>({})
+
+  const toggleExpand = async (id: number) => {
+    setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+    if (loteResumen[id] === undefined) {
+      try {
+        const r = await materialApi.getInventarioLote(id)
+        setLoteResumen(prev => ({ ...prev, [id]: r }))
+      } catch {
+        setLoteResumen(prev => ({ ...prev, [id]: null }))
+      }
+    }
+  }
+
   const load = useCallback(() => {
     setLoading(true); setError(null)
+    materialApi.getInventarioResumen().then(setResumen).catch(() => setResumen(null))
     Promise.all([
       materialApi.getInventarioCrudo(),
       materialApi.getInventarioConcentrado(),
@@ -63,7 +82,7 @@ export function InventarioApiPage() {
   const crAuReal   = (m: InvCrudoRow) => num(m.au_real ?? m.tenor)
   const crAgReal   = (m: InvCrudoRow) => (m.ag_real != null ? num(m.ag_real) : null)
   const crFalso    = (m: InvCrudoRow) => (m.tenor_falso != null ? num(m.tenor_falso) : null)
-  const crPagado   = (m: InvCrudoRow) => num(m.pagado_material ?? entradaMap[m.id]?.total_material)
+  const crPagado   = (m: InvCrudoRow) => num(m.pagado_material ?? entradaMap[m.id_entrada]?.total_material)
   const kMinas     = (l: InvConcentradoRow): string[] =>
     Array.isArray(l.minas) ? l.minas
     : typeof l.minas === 'string' ? l.minas.split(',').map(s => s.trim()).filter(Boolean)
@@ -74,6 +93,13 @@ export function InventarioApiPage() {
   const totalCrudoPag = crudo.reduce((s, m) => s + crPagado(m), 0)
   const totalConcHum  = concentrado.reduce((s, l) => s + num(l.toneladas_disponibles), 0)
 
+  // KPIs desde el endpoint /material/inventario/resumen, con fallback a lo calculado en el front.
+  const kEntradasSinLote = resumen?.entradas_sin_lote ?? crudo.length
+  const kCrudoHum        = resumen ? num(resumen.crudo_humedo_total) : totalCrudoHum
+  const kLotesEnCanoa    = resumen?.lotes_en_canoa ?? concentrado.length
+  const kConcHumDisp     = resumen ? num(resumen.concentrado_humedo_disponible) : totalConcHum
+  const kMaquilaTotal    = resumen ? num(resumen.concentrado_maquila_total) : concentrado.reduce((s, l) => s + num(l.maquila_total), 0)
+
   return (
     <div className="page">
       <PageHeader
@@ -83,10 +109,11 @@ export function InventarioApiPage() {
       />
 
       <div className="grid grid--kpi" style={{ marginBottom: '1.25rem' }}>
-        <KpiTile label="Entradas sin lote"     value={crudo.length}                    accent="amber"   />
-        <KpiTile label="T. húm. crudo"         value={`${totalCrudoHum.toFixed(2)} t`}  accent="brown"   />
-        <KpiTile label="Lotes en canoa"        value={concentrado.length}              accent="green"   />
-        <KpiTile label="T. húm. disponibles"   value={`${totalConcHum.toFixed(2)} t`}   accent="emerald" />
+        <KpiTile label="Entradas sin lote"     value={kEntradasSinLote}                 accent="amber"   />
+        <KpiTile label="T. húm. crudo"         value={`${kCrudoHum.toFixed(2)} t`}       accent="brown"   />
+        <KpiTile label="Lotes en canoa"        value={kLotesEnCanoa}                    accent="green"   />
+        <KpiTile label="Conc. húm. disponible" value={`${kConcHumDisp.toFixed(2)} t`}    accent="emerald" />
+        <KpiTile label="Maquila concentrado"   value={cop(kMaquilaTotal)}               accent="brown"   />
       </div>
 
       <div className="segment" role="tablist" style={{ marginBottom: 18 }}>
@@ -146,7 +173,7 @@ export function InventarioApiPage() {
                     {crudo.map(m => {
                       const pag = crPagado(m)
                       return (
-                        <tr key={m.id}>
+                        <tr key={m.id_entrada}>
                           <td className="mono" style={{ fontSize: 'var(--fs-sm)' }}>{m.numero_volqueta}</td>
                           <td style={{ fontWeight: 600 }}>{m.mina ?? '—'}</td>
                           <td style={{ fontSize: 'var(--fs-sm)' }}>{fmtDMY(m.fecha_llegada)}</td>
@@ -204,6 +231,7 @@ export function InventarioApiPage() {
                 <table className="data-table">
                   <thead>
                     <tr>
+                      <th style={{ width: '1.5rem' }}></th>
                       <th>Código</th><th>Canoa</th><th>Mina(s) de origen</th>
                       <th style={{ textAlign: 'right' }}>T. Húm. Disp.</th>
                       <th style={{ textAlign: 'right' }}>Au real</th>
@@ -217,8 +245,12 @@ export function InventarioApiPage() {
                       const disp = num(l.toneladas_disponibles)
                       const pag = l.pagado_material != null ? num(l.pagado_material) : null
                       const minas = kMinas(l)
+                      const isExp = expanded.has(l.id)
+                      const res = loteResumen[l.id]
                       return (
-                        <tr key={l.id}>
+                        <Fragment key={l.id}>
+                        <tr style={{ cursor: 'pointer', ...(isExp ? { background: 'var(--slate-50)' } : {}) }} onClick={() => toggleExpand(l.id)}>
+                          <td style={{ color: 'var(--text-muted)' }}>{isExp ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</td>
                           <td style={{ fontWeight: 700 }} className="mono">{l.codigo}</td>
                           <td style={{ fontSize: 'var(--fs-sm)' }}>{l.ubicacion_canoa ?? '—'}</td>
                           <td style={{ fontSize: 'var(--fs-xs)' }}>
@@ -241,12 +273,31 @@ export function InventarioApiPage() {
                             </span>
                           </td>
                         </tr>
+                        {isExp && (
+                          <tr style={{ background: 'var(--slate-50)' }}>
+                            <td colSpan={9} style={{ padding: '0.75rem 1rem 1rem 2rem' }}>
+                              {res === undefined ? (
+                                <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 0 }}>Cargando inventario del lote…</p>
+                              ) : res === null ? (
+                                <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 0 }}>No se pudo cargar el inventario de este lote.</p>
+                              ) : (
+                                <div className="callout" style={{ fontSize: 'var(--fs-sm)', display: 'flex', gap: '1.5rem', flexWrap: 'wrap', margin: 0 }}>
+                                  <span>Materiales procesados: <strong>{res.num_materiales}</strong></span>
+                                  <span>Total seco procesado: <strong>{num(res.total_seco_procesado).toFixed(4)} t</strong></span>
+                                  <span>Inventario disponible: <strong style={{ color: 'var(--emerald-700)' }}>{num(res.inventario_disponible).toFixed(2)} t</strong></span>
+                                  <span>Estado inventario: <strong style={{ textTransform: 'capitalize' }}>{res.inventario_estado}</strong></span>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       )
                     })}
                   </tbody>
                   <tfoot>
                     <tr style={{ fontWeight: 700 }}>
-                      <td colSpan={3}>Total ({concentrado.length})</td>
+                      <td colSpan={4}>Total ({concentrado.length})</td>
                       <td style={{ textAlign: 'right' }} className="mono">{totalConcHum.toFixed(2)} t</td>
                       <td colSpan={4} />
                     </tr>

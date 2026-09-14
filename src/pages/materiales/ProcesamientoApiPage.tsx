@@ -4,11 +4,12 @@ import { Button, Card, Input, KpiTile, Modal, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
 import { useCanWrite } from '@/hooks/usePermissions'
 import { apiError } from '@/api/client'
-import { formatCOP, formatDate, todayISO } from '@/utils/format'
+import { formatCOP, todayISO } from '@/utils/format'
 import {
   materialApi, num,
   type LoteConcentradoRow, type LoteConcentradoDetalle,
   type AnalisisConcentrado, type ConcentradoResumen, type InvCrudoRow, type ProcesamientoMaterialRow,
+  type ConcentradoProcesarResult, type MermaPayload,
 } from '@/api/material'
 
 const cop = formatCOP
@@ -26,11 +27,32 @@ const GROUP_TH: React.CSSProperties = {
   fontWeight: 700, padding: '4px 6px',
 }
 
+// Procesos aplicados a un lote (checkboxes reutilizados en Crear/Editar/Cerrar).
+const PROCESOS: [keyof ProcesosState, string][] = [
+  ['hizo_molienda', 'Molienda'],
+  ['hizo_flotacion', 'Flotación'],
+  ['hizo_relave', 'Relave'],
+  ['hizo_filtroprensa', 'Filtroprensa'],
+]
+interface ProcesosState {
+  hizo_molienda: boolean
+  hizo_flotacion: boolean
+  hizo_relave: boolean
+  hizo_filtroprensa: boolean
+}
+const procesosFrom = (l: { hizo_molienda?: boolean | number; hizo_flotacion?: boolean | number; hizo_relave?: boolean | number; hizo_filtroprensa?: boolean | number }): ProcesosState => ({
+  hizo_molienda: !!l.hizo_molienda, hizo_flotacion: !!l.hizo_flotacion,
+  hizo_relave: !!l.hizo_relave, hizo_filtroprensa: !!l.hizo_filtroprensa,
+})
+
 function fmtDMY(iso: string) {
   if (!iso) return '—'
   const [y, m, d] = iso.slice(0, 10).split('-')
   return `${d}/${m}/${y.slice(2)}`
 }
+// Prefiere la fecha ya formateada del backend (dd/mm/aa); si no, formatea el ISO.
+const fechaFmt = (fmt: string | null | undefined, iso: string | null | undefined) =>
+  fmt || (iso ? fmtDMY(iso) : '—')
 
 type Tab = 'lotes' | 'procesamiento'
 
@@ -66,11 +88,14 @@ function LotesTab() {
   const [saving, setSaving] = useState(false)
 
   // Forms
-  const [formCrear, setFormCrear] = useState({ codigo: '', fecha_inicio: todayISO() })
+  const [formCrear, setFormCrear] = useState({ codigo: '', fecha_inicio: todayISO(), hizo_molienda: false, hizo_flotacion: false, hizo_relave: false, hizo_filtroprensa: false })
   const [selVincular, setSelVincular] = useState<Set<number>>(new Set())
   const [tonVincular, setTonVincular] = useState('')
+  const [vincResult, setVincResult] = useState<ConcentradoProcesarResult | null>(null)
   const [formCerrar, setFormCerrar] = useState({ ton_humedo: '', porcentaje_humedad: '13', fecha_fin: todayISO(), ubicacion_canoa: '', hizo_molienda: false, hizo_flotacion: false, hizo_relave: false, hizo_filtroprensa: false })
-  const [formEditar, setFormEditar] = useState({ codigo: '', ubicacion_canoa: '', comentarios: '' })
+  const [formEditar, setFormEditar] = useState({ codigo: '', fecha_inicio: '', ubicacion_canoa: '', comentarios: '', ton_humedo: '', porcentaje_humedad: '13', merma_au: '', merma_ag: '', hizo_molienda: false, hizo_flotacion: false, hizo_relave: false, hizo_filtroprensa: false })
+  // Merma original del lote (para detectar cambios al guardar en Editar).
+  const [mermaOrig, setMermaOrig] = useState({ au: '', ag: '' })
   const [formAnalisis, setFormAnalisis] = useState({ numero_analisis: '', porcentaje_humedad: '13', au_concentrado: '', ag_concentrado: '' })
 
   const load = useCallback(() => {
@@ -102,24 +127,32 @@ function LotesTab() {
     return true
   })
 
+  // Selección por ÍNDICE de fila (el `id` de /inventario/crudo no es único por
+  // fila; usar el id marcaba varias filas a la vez). El id real se resuelve al guardar.
   const disponibles = crudo
-  const totalSelSec = [...selVincular].reduce((s, id) => { const m = crudo.find(x => x.id === id); return m ? s + num(m.disponible_seco || m.total_material_seco) : s }, 0)
-  const totalSelHum = [...selVincular].reduce((s, id) => { const m = crudo.find(x => x.id === id); return m ? s + num(m.toneladas_humedo) : s }, 0)
-  const toggleSel = (id: number) => setSelVincular(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const totalSelSec = [...selVincular].reduce((s, i) => { const m = disponibles[i]; return m ? s + num(m.disponible_seco || m.total_material_seco) : s }, 0)
+  const totalSelHum = [...selVincular].reduce((s, i) => { const m = disponibles[i]; return m ? s + num(m.toneladas_humedo) : s }, 0)
+  const toggleSel = (i: number) => setSelVincular(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n })
 
   // ── Writes ──
   const guardarCrear = async () => {
     if (!formCrear.codigo.trim()) return
     setSaving(true)
     try {
-      await materialApi.createConcentrado({ codigo: formCrear.codigo.trim(), fecha_inicio: formCrear.fecha_inicio })
+      await materialApi.createConcentrado({
+        codigo: formCrear.codigo.trim(), fecha_inicio: formCrear.fecha_inicio,
+        hizo_molienda: formCrear.hizo_molienda ? 1 : 0, hizo_flotacion: formCrear.hizo_flotacion ? 1 : 0,
+        hizo_relave: formCrear.hizo_relave ? 1 : 0, hizo_filtroprensa: formCrear.hizo_filtroprensa ? 1 : 0,
+      })
       toast.success('Lote creado')
-      setCrearOpen(false); setFormCrear({ codigo: '', fecha_inicio: todayISO() }); load()
+      setCrearOpen(false)
+      setFormCrear({ codigo: '', fecha_inicio: todayISO(), hizo_molienda: false, hizo_flotacion: false, hizo_relave: false, hizo_filtroprensa: false })
+      load()
     } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
   }
 
   const abrirVincular = (l: LoteConcentradoRow) => {
-    setVincularLote(l); setSelVincular(new Set()); setTonVincular('')
+    setVincularLote(l); setSelVincular(new Set()); setTonVincular(''); setVincResult(null)
     materialApi.getInventarioCrudo().then(setCrudo).catch(e => toast.error(apiError(e).message))
   }
   const guardarVincular = async () => {
@@ -127,15 +160,23 @@ function LotesTab() {
     setSaving(true)
     try {
       const ton = tonVincular ? Math.min(Number(tonVincular), totalSelSec) : totalSelSec
-      await materialApi.procesarConcentrado(vincularLote.id, { id_entradas: [...selVincular], toneladas_procesadas_seco: ton })
-      toast.success('Materiales vinculados')
-      setVincularLote(null); setDetalle(prev => { const n = { ...prev }; delete n[vincularLote.id]; return n }); load()
+      const idEntradas = [...selVincular].map(i => disponibles[i]?.id_entrada).filter((x): x is number => x != null)
+      const res = await materialApi.procesarConcentrado(vincularLote.id, { id_entradas: idEntradas, toneladas_procesadas_seco: ton })
+      setVincResult(res)
+      // Refresca inventario y detalle; deja el modal abierto para ver el acumulado.
+      setSelVincular(new Set()); setTonVincular('')
+      materialApi.getInventarioCrudo().then(setCrudo).catch(() => {})
+      setDetalle(prev => { const n = { ...prev }; delete n[vincularLote.id]; return n }); load()
+      toast.success(`Vinculado · acumulado ${num(res.material_seco_procesado).toFixed(3)} t seco`)
     } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
   }
 
   const abrirCerrar = (l: LoteConcentradoRow) => {
     setCerrarLote(l)
-    setFormCerrar({ ton_humedo: '', porcentaje_humedad: '13', fecha_fin: todayISO(), ubicacion_canoa: '',
+    // Si el lote ya tiene análisis con humedad, precárgala (no re-digitarla).
+    const anHum = analisisMap[l.id]?.find(a => a.porcentaje_humedad != null)?.porcentaje_humedad
+    const humFrac = anHum != null ? num(anHum) : (l.porcentaje_humedad != null ? num(l.porcentaje_humedad) : null)
+    setFormCerrar({ ton_humedo: '', porcentaje_humedad: humFrac != null ? String(humFrac * 100) : '13', fecha_fin: todayISO(), ubicacion_canoa: '',
       hizo_molienda: !!l.hizo_molienda, hizo_flotacion: !!l.hizo_flotacion, hizo_relave: !!l.hizo_relave, hizo_filtroprensa: !!l.hizo_filtroprensa })
   }
   const guardarCerrar = async () => {
@@ -144,7 +185,8 @@ function LotesTab() {
     try {
       await materialApi.cerrarConcentrado(cerrarLote.id, {
         toneladas_humedo: Number(formCerrar.ton_humedo),
-        porcentaje_humedad: Number(formCerrar.porcentaje_humedad) / 100,
+        // Humedad opcional: si se deja vacía, el backend usa la conocida (p.ej. del análisis).
+        porcentaje_humedad: formCerrar.porcentaje_humedad ? Number(formCerrar.porcentaje_humedad) / 100 : undefined,
         fecha_fin: formCerrar.fecha_fin,
         hizo_molienda: formCerrar.hizo_molienda, hizo_flotacion: formCerrar.hizo_flotacion,
         hizo_relave: formCerrar.hizo_relave, hizo_filtroprensa: formCerrar.hizo_filtroprensa,
@@ -157,18 +199,77 @@ function LotesTab() {
 
   const abrirEditar = (l: LoteConcentradoRow) => {
     setEditarLote(l)
-    setFormEditar({ codigo: l.codigo, ubicacion_canoa: l.ubicacion_canoa ?? '', comentarios: l.comentarios ?? '' })
+    setMermaOrig({ au: '', ag: '' })
+    setFormEditar({
+      codigo: l.codigo, fecha_inicio: (l.fecha_inicio ?? '').slice(0, 10),
+      ubicacion_canoa: l.ubicacion_canoa ?? '', comentarios: l.comentarios ?? '',
+      ton_humedo: l.toneladas_humedo != null ? String(num(l.toneladas_humedo)) : '',
+      porcentaje_humedad: l.porcentaje_humedad != null ? String(num(l.porcentaje_humedad) * 100) : '13',
+      merma_au: '', merma_ag: '',
+      ...procesosFrom(l),
+    })
+    // Carga la merma actual del lote para precargarla y detectar cambios al guardar.
+    materialApi.getConcentradoMerma(l.id).then(mz => {
+      const au = mz.merma_au != null ? String(num(mz.merma_au)) : ''
+      const ag = mz.merma_ag != null ? String(num(mz.merma_ag)) : ''
+      setMermaOrig({ au, ag })
+      setFormEditar(f => ({ ...f, merma_au: au, merma_ag: ag }))
+    }).catch(() => {})
   }
   const guardarEditar = async () => {
     if (!editarLote) return
+    const l = editarLote
+    // Datos generales del lote (código, fechas, procesos, ubicación, comentarios).
+    const generalChanged =
+      formEditar.codigo !== l.codigo ||
+      formEditar.fecha_inicio !== (l.fecha_inicio ?? '').slice(0, 10) ||
+      formEditar.ubicacion_canoa !== (l.ubicacion_canoa ?? '') ||
+      formEditar.comentarios !== (l.comentarios ?? '') ||
+      formEditar.hizo_molienda !== !!l.hizo_molienda ||
+      formEditar.hizo_flotacion !== !!l.hizo_flotacion ||
+      formEditar.hizo_relave !== !!l.hizo_relave ||
+      formEditar.hizo_filtroprensa !== !!l.hizo_filtroprensa
+    // Concentrado producido (solo lotes en canoa): compara con lo que había.
+    const origTon = l.toneladas_humedo != null ? String(num(l.toneladas_humedo)) : ''
+    const origHum = l.porcentaje_humedad != null ? String(num(l.porcentaje_humedad) * 100) : '13'
+    const concentradoChanged = l.estado === 'en_canoa' && !!formEditar.ton_humedo &&
+      (formEditar.ton_humedo !== origTon || formEditar.porcentaje_humedad !== origHum)
+    // Merma (gramos de metal): solo se registra si cambió respecto a lo cargado.
+    const mermaChanged = formEditar.merma_au !== mermaOrig.au || formEditar.merma_ag !== mermaOrig.ag
+
+    if ((formEditar.merma_au && Number(formEditar.merma_au) < 0) || (formEditar.merma_ag && Number(formEditar.merma_ag) < 0)) {
+      toast.error('La merma debe ser un número ≥ 0'); return
+    }
+    if (!generalChanged && !concentradoChanged && !mermaChanged) { setEditarLote(null); return }
     setSaving(true)
     try {
-      await materialApi.updateConcentrado(editarLote.id, {
-        codigo: formEditar.codigo || undefined,
-        ubicacion_canoa: formEditar.ubicacion_canoa || undefined,
-        comentarios: formEditar.comentarios || undefined,
-      })
-      toast.success('Lote actualizado')
+      if (generalChanged) {
+        await materialApi.updateConcentrado(l.id, {
+          codigo: formEditar.codigo || undefined,
+          fecha_inicio: formEditar.fecha_inicio || undefined,
+          ubicacion_canoa: formEditar.ubicacion_canoa || undefined,
+          comentarios: formEditar.comentarios || undefined,
+          hizo_molienda: formEditar.hizo_molienda, hizo_flotacion: formEditar.hizo_flotacion,
+          hizo_relave: formEditar.hizo_relave, hizo_filtroprensa: formEditar.hizo_filtroprensa,
+        })
+      }
+      if (concentradoChanged) {
+        await materialApi.corregirConcentrado(l.id, {
+          toneladas_humedo: Number(formEditar.ton_humedo),
+          porcentaje_humedad: Number(formEditar.porcentaje_humedad) / 100,
+          ubicacion_canoa: formEditar.ubicacion_canoa || undefined,
+        })
+      }
+      if (mermaChanged) {
+        // Enviar solo lo que cambió (vacío → 0).
+        const body: MermaPayload = {}
+        if (formEditar.merma_au !== mermaOrig.au) body.merma_au = formEditar.merma_au ? Number(formEditar.merma_au) : 0
+        if (formEditar.merma_ag !== mermaOrig.ag) body.merma_ag = formEditar.merma_ag ? Number(formEditar.merma_ag) : 0
+        await materialApi.updateConcentradoMerma(l.id, body)
+      }
+      // Recargar el detalle para mostrar maquila/concentrado recalculados por el back.
+      setDetalle(prev => { const n = { ...prev }; delete n[l.id]; return n })
+      toast.success(mermaChanged ? 'Lote actualizado · merma registrada' : concentradoChanged ? 'Lote actualizado · concentrado corregido' : 'Lote actualizado · maquila recalculada')
       setEditarLote(null); load()
     } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
   }
@@ -213,8 +314,13 @@ function LotesTab() {
     if (!confirm(`¿Eliminar lote ${l.codigo}? Esta acción no se puede deshacer.`)) return
     try {
       await materialApi.deleteConcentrado(l.id)
+      setDetalle(prev => { const n = { ...prev }; delete n[l.id]; return n })
+      setEditarLote(null)
       toast.success('Lote eliminado'); load()
-    } catch (e) { toast.error(apiError(e).message) }
+    } catch (e) {
+      // 409: el lote ya está en un viaje despachado → mostrar el mensaje del back.
+      toast.error(apiError(e).message)
+    }
   }
 
   const kpiEnProceso = resumen?.en_proceso ?? lotes.filter(l => l.estado === 'en_proceso').length
@@ -258,16 +364,17 @@ function LotesTab() {
                 <th style={{ textAlign: 'right' }}>Concentrado</th>
                 <th style={{ textAlign: 'right' }}>Tenor real</th>
                 <th style={{ textAlign: 'right' }}>Costo maquila</th>
+                <th style={{ textAlign: 'right' }}>Precio total</th>
                 {canWrite && <th></th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={canWrite ? 10 : 9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Cargando…</td></tr>
+                <tr><td colSpan={canWrite ? 11 : 10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Cargando…</td></tr>
               ) : error ? (
-                <tr><td colSpan={canWrite ? 10 : 9} style={{ textAlign: 'center', color: 'var(--rose-600)', padding: '2rem' }}>{error} · <button onClick={load} style={{ background: 'none', border: 'none', color: 'var(--amber-700)', textDecoration: 'underline', cursor: 'pointer' }}>Reintentar</button></td></tr>
+                <tr><td colSpan={canWrite ? 11 : 10} style={{ textAlign: 'center', color: 'var(--rose-600)', padding: '2rem' }}>{error} · <button onClick={load} style={{ background: 'none', border: 'none', color: 'var(--amber-700)', textDecoration: 'underline', cursor: 'pointer' }}>Reintentar</button></td></tr>
               ) : lotesFiltrados.length === 0 ? (
-                <tr><td colSpan={canWrite ? 10 : 9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Sin registros</td></tr>
+                <tr><td colSpan={canWrite ? 11 : 10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Sin registros</td></tr>
               ) : lotesFiltrados.map(l => {
                 const isExp = expanded.has(l.id)
                 const det = detalle[l.id]
@@ -282,11 +389,11 @@ function LotesTab() {
                       <td style={{ fontWeight: 700 }} className="mono">{l.codigo}</td>
                       <td><span className={`badge ${ESTADO_LOTE[l.estado]?.badge ?? 'badge--neutral'}`}>{ESTADO_LOTE[l.estado]?.label ?? l.estado}</span></td>
                       <td style={{ fontSize: 'var(--fs-sm)', lineHeight: 1.5 }} className="mono">
-                        <div title="Entrada / inicio de proceso"><span className="date-tag date-tag--e">E</span>{fmtDMY(l.fecha_inicio)}</div>
-                        <div title="Salida / fin de proceso"><span className="date-tag date-tag--s">S</span>{l.fecha_fin ? fmtDMY(l.fecha_fin) : <em style={{ color: 'var(--text-faint)', fontStyle: 'normal' }}>—</em>}</div>
+                        <div title="Entrada / inicio de proceso"><span className="date-tag date-tag--e">E</span>{fechaFmt(l.fecha_inicio_fmt, l.fecha_inicio)}</div>
+                        <div title="Salida / fin de proceso"><span className="date-tag date-tag--s">S</span>{(l.fecha_fin_fmt || l.fecha_fin) ? fechaFmt(l.fecha_fin_fmt, l.fecha_fin) : <em style={{ color: 'var(--text-faint)', fontStyle: 'normal' }}>—</em>}</div>
                       </td>
                       <td style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
-                        {[l.hizo_molienda && 'Mol', l.hizo_flotacion && 'Flot', l.hizo_filtroprensa && 'Fil'].filter(Boolean).join(' · ') || '—'}
+                        {[l.hizo_molienda && 'Mol', l.hizo_flotacion && 'Flot', l.hizo_relave && 'Rel', l.hizo_filtroprensa && 'Fil'].filter(Boolean).join(' · ') || '—'}
                       </td>
                       <td style={{ textAlign: 'right' }} className="mono">{matSeco > 0 ? `${matSeco.toFixed(3)} t` : '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: num(l.toneladas_humedo) > 0 ? 700 : undefined, color: num(l.toneladas_humedo) > 0 ? 'var(--emerald-700)' : undefined }} className="mono">
@@ -296,17 +403,21 @@ function LotesTab() {
                         )}
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: tieneAnalisis ? 'var(--amber-700)' : undefined }} className="mono">
-                        {tieneAnalisis ? `${num(l.au_gr_x_ton).toFixed(2)} g/t` : <em style={{ color: 'var(--text-faint)', fontWeight: 400 }}>—</em>}
+                        {tieneAnalisis ? `${num(l.au_gr_x_ton).toFixed(2)} g/t`
+                          : num(l.tenor) > 0 ? <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{`${num(l.tenor).toFixed(2)} g/t`}</span>
+                          : <em style={{ color: 'var(--text-faint)', fontWeight: 400 }}>—</em>}
                       </td>
                       <td style={{ textAlign: 'right' }} className="mono">
                         {num(l.maquila_total) > 0 ? cop(num(l.maquila_total)) : matSeco > 0 ? <span style={{ color: 'var(--text-muted)' }}>{cop(maquilaEst)}</span> : '—'}
                       </td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: num(l.precio_total_material) > 0 ? 'var(--emerald-700)' : undefined }} className="mono">
+                        {num(l.precio_total_material) > 0 ? cop(num(l.precio_total_material)) : '—'}
+                      </td>
                       {canWrite && (
                         <td onClick={e => e.stopPropagation()}>
                           <div className="row" style={{ gap: 4 }}>
-                            <Button variant="secondary" size="sm" icon={<Pencil size={13}/>} onClick={() => abrirEditar(l)} />
+                            <Button variant="secondary" size="sm" icon={<Pencil size={13}/>} title="Editar lote" onClick={() => abrirEditar(l)} />
                             <Button variant="secondary" size="sm" icon={<FlaskConical size={13}/>} title={tieneAnalisis ? 'Actualizar análisis' : 'Agregar análisis'} onClick={() => abrirAnalisis(l)} />
-                            {l.estado === 'en_proceso' && <Button variant="ghost" size="sm" icon={<Trash2 size={13}/>} onClick={() => eliminarLote(l)} />}
                           </div>
                         </td>
                       )}
@@ -314,7 +425,16 @@ function LotesTab() {
 
                     {isExp && (
                       <tr style={{ background: 'var(--slate-50)' }}>
-                        <td colSpan={canWrite ? 10 : 9} style={{ padding: '0.75rem 1rem 1rem 2rem' }}>
+                        <td colSpan={canWrite ? 11 : 10} style={{ padding: '0.75rem 1rem 1rem 2rem' }}>
+                          {det && (
+                            <div className="callout" style={{ marginBottom: '0.75rem', fontSize: 'var(--fs-sm)', display: 'flex', gap: '1.25rem', flexWrap: 'wrap' }}>
+                              <span>Mat. seco: <strong>{num(det.material_seco_procesado).toFixed(3)} t</strong></span>
+                              <span>Maquila x ton: <strong>{det.precio_maquila_por_ton != null ? cop(num(det.precio_maquila_por_ton)) : '—'}</strong></span>
+                              <span>Maquila total: <strong>{num(det.maquila_total) > 0 ? cop(num(det.maquila_total)) : '—'}</strong></span>
+                              <span>Precio total material: <strong style={{ color: 'var(--emerald-700)' }}>{num(det.precio_total_material) > 0 ? cop(num(det.precio_total_material)) : '—'}</strong></span>
+                              {num(det.total_material_con_costos) > 0 && <span>Total con costos: <strong>{cop(num(det.total_material_con_costos))}</strong></span>}
+                            </div>
+                          )}
                           <p style={{ fontWeight: 600, fontSize: 'var(--fs-sm)', marginBottom: '0.5rem' }}>
                             Materiales procesados ({det ? matVin.length : '…'}):
                           </p>
@@ -328,27 +448,41 @@ function LotesTab() {
                                 <thead>
                                   <tr>
                                     <th>Vol.</th><th>Mina</th><th>Fecha</th>
-                                    <th style={{ textAlign: 'right' }}>T. Húm.</th>
-                                    <th style={{ textAlign: 'right' }}>T. Seco</th>
+                                    <th style={{ textAlign: 'right' }}>T. Seco aport.</th>
                                     <th style={{ textAlign: 'right' }}>Tenor</th>
+                                    <th style={{ textAlign: 'right' }}>Concentrado aport.</th>
+                                    <th style={{ textAlign: 'right' }}>Precio material</th>
                                     {canWrite && l.estado === 'en_proceso' && <th></th>}
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {matVin.map(m => (
+                                  {matVin.map(m => {
+                                    const secoAport = m.toneladas_seco_aportadas != null ? num(m.toneladas_seco_aportadas) : num(m.total_material_seco)
+                                    return (
                                     <tr key={m.id}>
                                       <td className="mono">{m.numero_volqueta}</td>
                                       <td>{m.mina ?? '—'}</td>
-                                      <td>{formatDate(m.fecha_llegada)}</td>
-                                      <td style={{ textAlign: 'right' }} className="mono">{num(m.peso_llegada_planta).toFixed(3)} t</td>
-                                      <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">{num(m.total_material_seco).toFixed(4)} t</td>
+                                      <td>{fmtDMY(m.fecha_llegada)}</td>
+                                      <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">{secoAport.toFixed(4)} t</td>
                                       <td style={{ textAlign: 'right' }} className="mono">{num(m.tenor) > 0 ? `${num(m.tenor).toFixed(1)} gr/t` : <em style={{ color: 'var(--text-faint)' }}>S/A</em>}</td>
+                                      <td style={{ textAlign: 'right', fontWeight: 700, color: num(m.concentrado_proporcional) > 0 ? 'var(--emerald-700)' : undefined }} className="mono">{m.concentrado_proporcional != null ? `${num(m.concentrado_proporcional).toFixed(4)} t` : '—'}</td>
+                                      <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">{m.precio_material_lote != null ? cop(num(m.precio_material_lote)) : '—'}</td>
                                       {canWrite && l.estado === 'en_proceso' && (
                                         <td><Button variant="ghost" size="sm" icon={<Trash2 size={13}/>} title="Desvincular del lote" onClick={() => desvincularMaterial(m.id, l)} /></td>
                                       )}
                                     </tr>
-                                  ))}
+                                  )})}
                                 </tbody>
+                                <tfoot>
+                                  <tr style={{ fontWeight: 700 }}>
+                                    <td colSpan={3}>Total material</td>
+                                    <td style={{ textAlign: 'right' }} className="mono">{num(det.material_seco_procesado) > 0 ? `${num(det.material_seco_procesado).toFixed(4)} t` : '—'}</td>
+                                    <td />
+                                    <td style={{ textAlign: 'right', color: 'var(--emerald-700)' }} className="mono">{(() => { const c = matVin.reduce((s, m) => s + num(m.concentrado_proporcional), 0); return c > 0 ? `${c.toFixed(4)} t` : '—' })()}</td>
+                                    <td style={{ textAlign: 'right', color: 'var(--emerald-700)' }} className="mono">{num(det.precio_total_material) > 0 ? cop(num(det.precio_total_material)) : '—'}</td>
+                                    {canWrite && l.estado === 'en_proceso' && <td />}
+                                  </tr>
+                                </tfoot>
                               </table>
                             </div>
                           )}
@@ -393,8 +527,19 @@ function LotesTab() {
           <Input label="Fecha inicio" type="date"
             value={formCrear.fecha_inicio} onChange={e => setFormCrear(f => ({...f, fecha_inicio: e.target.value}))} />
         </div>
+        <div style={{ marginTop: '1rem' }}>
+          <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>Procesos aplicados (Relave ya incluye Filtroprensa):</p>
+          <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap' }}>
+            {PROCESOS.map(([k, label]) => (
+              <label key={k} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: 'var(--fs-sm)' }}>
+                <input type="checkbox" checked={formCrear[k]} onChange={e => setFormCrear(f => ({...f, [k]: e.target.checked}))} />
+                {label}
+              </label>
+            ))}
+          </div>
+        </div>
         <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: '0.75rem' }}>
-          El lote queda en estado <strong>En proceso</strong>.
+          El lote queda en estado <strong>En proceso</strong>. La maquila la calcula el sistema.
         </p>
       </Modal>
 
@@ -407,6 +552,16 @@ function LotesTab() {
         </>}>
         {vincularLote && (
           <>
+            {vincResult && (
+              <div className="callout" style={{ marginBottom: '0.75rem', background: 'var(--green-50)', borderColor: 'var(--green-200)' }}>
+                <strong>Acumulado del lote:</strong> {num(vincResult.material_seco_procesado).toFixed(3)} t seco
+                {' · '}Maquila x ton: <strong>{vincResult.precio_maquila_por_ton != null ? cop(num(vincResult.precio_maquila_por_ton)) : '—'}</strong>
+                {' · '}Maquila provisional: <strong>{vincResult.maquila_total != null ? cop(num(vincResult.maquila_total)) : '—'}</strong>
+                <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: 4 }}>
+                  Último lote agregado: {num(vincResult.total_seco_agregado).toFixed(3)} t seco. Puedes vincular más material o cerrar.
+                </div>
+              </div>
+            )}
             <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
               Material crudo disponible (pendiente sin lote):
             </p>
@@ -425,14 +580,14 @@ function LotesTab() {
                     </tr>
                   </thead>
                   <tbody>
-                    {disponibles.map(m => {
-                      const sel = selVincular.has(m.id)
+                    {disponibles.map((m, i) => {
+                      const sel = selVincular.has(i)
                       return (
-                        <tr key={m.id} style={{ cursor: 'pointer', ...(sel ? { background: 'var(--green-50)' } : {}) }} onClick={() => toggleSel(m.id)}>
-                          <td><input type="checkbox" checked={sel} onChange={() => toggleSel(m.id)} onClick={e => e.stopPropagation()} /></td>
+                        <tr key={i} style={{ cursor: 'pointer', ...(sel ? { background: 'var(--green-50)' } : {}) }} onClick={() => toggleSel(i)}>
+                          <td><input type="checkbox" checked={sel} onChange={() => toggleSel(i)} onClick={e => e.stopPropagation()} /></td>
                           <td className="mono" style={{ fontSize: 'var(--fs-sm)' }}>{m.numero_volqueta}</td>
                           <td style={{ fontWeight: 600 }}>{m.mina ?? '—'}</td>
-                          <td style={{ fontSize: 'var(--fs-sm)' }}>{formatDate(m.fecha_llegada)}</td>
+                          <td style={{ fontSize: 'var(--fs-sm)' }}>{fmtDMY(m.fecha_llegada)}</td>
                           <td style={{ textAlign: 'right', fontWeight: sel ? 700 : undefined, color: sel ? 'var(--green-700)' : undefined }} className="mono">{num(m.disponible_seco || m.total_material_seco).toFixed(4)}</td>
                           <td style={{ textAlign: 'right' }} className="mono">{num(m.tenor) > 0 ? num(m.tenor).toFixed(1) : <em style={{ color: 'var(--text-faint)' }}>S/A</em>}</td>
                           <td><span className={`badge badge--${m.estado === 'pagada' ? 'success' : 'warning'}`}>{m.estado}</span></td>
@@ -474,14 +629,15 @@ function LotesTab() {
               <Input label="Toneladas húmedas producidas" type="number" step="0.001" required placeholder="0.000"
                 value={formCerrar.ton_humedo} onChange={e => setFormCerrar(f => ({...f, ton_humedo: e.target.value}))} />
               <Input label="Humedad del concentrado (%)" type="number" step="0.1" placeholder="13"
-                value={formCerrar.porcentaje_humedad} onChange={e => setFormCerrar(f => ({...f, porcentaje_humedad: e.target.value}))} />
+                value={formCerrar.porcentaje_humedad} onChange={e => setFormCerrar(f => ({...f, porcentaje_humedad: e.target.value}))}
+                helper={cerrarLote.au_gr_x_ton != null ? 'Precargada del análisis del lote; ajústala solo si difiere.' : undefined} />
               <Input label="Fecha fin proceso" type="date"
                 value={formCerrar.fecha_fin} onChange={e => setFormCerrar(f => ({...f, fecha_fin: e.target.value}))} />
               <Input label="Ubicación canoa" placeholder="Canoa Principal"
                 value={formCerrar.ubicacion_canoa} onChange={e => setFormCerrar(f => ({...f, ubicacion_canoa: e.target.value}))} />
             </div>
             <div style={{ marginTop: '1rem' }}>
-              <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>Procesos aplicados:</p>
+              <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>Procesos aplicados (Relave ya incluye Filtroprensa):</p>
               <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap' }}>
                 {([['hizo_molienda','Molienda'],['hizo_flotacion','Flotación'],['hizo_relave','Relave'],['hizo_filtroprensa','Filtroprensa']] as [keyof typeof formCerrar, string][]).map(([k, label]) => (
                   <label key={k} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: 'var(--fs-sm)' }}>
@@ -504,16 +660,77 @@ function LotesTab() {
       {/* ── Modal: Editar lote ── */}
       <Modal open={!!editarLote} title={`Editar lote — ${editarLote?.codigo ?? ''}`}
         onClose={() => setEditarLote(null)}
-        footer={<>
-          <Button variant="secondary" onClick={() => setEditarLote(null)}>Cancelar</Button>
-          <Button onClick={guardarEditar} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
-        </>}>
-        {editarLote && (
-          <div className="grid grid--form">
-            <Input label="Código" value={formEditar.codigo} onChange={e => setFormEditar(f => ({...f, codigo: e.target.value}))} />
-            <Input label="Ubicación canoa" placeholder="Canoa Principal" value={formEditar.ubicacion_canoa} onChange={e => setFormEditar(f => ({...f, ubicacion_canoa: e.target.value}))} />
-            <Input label="Comentarios" value={formEditar.comentarios} onChange={e => setFormEditar(f => ({...f, comentarios: e.target.value}))} style={{ gridColumn: '1/-1' }} />
+        footer={<div className="row" style={{ justifyContent: 'space-between', width: '100%', gap: 8 }}>
+          {editarLote && (editarLote.estado === 'en_proceso' || editarLote.estado === 'en_canoa')
+            ? <Button variant="ghost" icon={<Trash2 size={14}/>} onClick={() => eliminarLote(editarLote)}
+                style={{ color: 'var(--rose-600)' }}>Eliminar lote</Button>
+            : <span />}
+          <div className="row" style={{ gap: 8 }}>
+            <Button variant="secondary" onClick={() => setEditarLote(null)}>Cancelar</Button>
+            <Button onClick={guardarEditar} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
           </div>
+        </div>}>
+        {editarLote && (
+          <>
+            <div className="grid grid--form">
+              <Input label="Código" value={formEditar.codigo} onChange={e => setFormEditar(f => ({...f, codigo: e.target.value}))} />
+              <Input label="Fecha inicio" type="date" value={formEditar.fecha_inicio} onChange={e => setFormEditar(f => ({...f, fecha_inicio: e.target.value}))} />
+              <Input label="Ubicación canoa" placeholder="Canoa Principal" value={formEditar.ubicacion_canoa} onChange={e => setFormEditar(f => ({...f, ubicacion_canoa: e.target.value}))} />
+              <Input label="Maquila por tonelada" value={editarLote.precio_maquila_por_ton != null ? cop(num(editarLote.precio_maquila_por_ton)) : '—'} readOnly disabled helper="Derivado de los procesos (solo lectura)" />
+              <Input label="Comentarios" value={formEditar.comentarios} onChange={e => setFormEditar(f => ({...f, comentarios: e.target.value}))} style={{ gridColumn: '1/-1' }} />
+            </div>
+            <div style={{ marginTop: '1rem' }}>
+              <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>Procesos aplicados (Relave ya incluye Filtroprensa):</p>
+              <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap' }}>
+                {PROCESOS.map(([k, label]) => (
+                  <label key={k} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: 'var(--fs-sm)' }}>
+                    <input type="checkbox" checked={formEditar[k]} onChange={e => setFormEditar(f => ({...f, [k]: e.target.checked}))} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                Cambiar los procesos recalcula la maquila en el servidor al guardar.
+              </p>
+            </div>
+
+            {editarLote.estado === 'en_canoa' && (
+              <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border, #e5e7eb)' }}>
+                <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>
+                  Concentrado producido:
+                </p>
+                <div className="grid grid--form">
+                  <Input label="Toneladas húmedas" type="number" step="0.001" placeholder="0.000"
+                    value={formEditar.ton_humedo} onChange={e => setFormEditar(f => ({...f, ton_humedo: e.target.value}))} />
+                  <Input label="Humedad del concentrado (%)" type="number" step="0.1" placeholder="13"
+                    value={formEditar.porcentaje_humedad} onChange={e => setFormEditar(f => ({...f, porcentaje_humedad: e.target.value}))} />
+                </div>
+                {formEditar.ton_humedo && (
+                  <div className="callout" style={{ marginTop: '0.75rem' }}>
+                    T. seco: <strong>{(Number(formEditar.ton_humedo) * (1 - Number(formEditar.porcentaje_humedad) / 100)).toFixed(4)} t</strong>
+                  </div>
+                )}
+                <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                  Ajusta el concentrado si te equivocaste al cerrar el lote. Solo se corrige si cambias estos valores.
+                </p>
+              </div>
+            )}
+
+            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border, #e5e7eb)' }}>
+              <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>
+                Merma (gramos de metal perdidos):
+              </p>
+              <div className="grid grid--form">
+                <Input label="Merma Au (g)" type="number" step="0.01" min="0" placeholder="0"
+                  value={formEditar.merma_au} onChange={e => setFormEditar(f => ({...f, merma_au: e.target.value}))} />
+                <Input label="Merma Ag (g)" type="number" step="0.01" min="0" placeholder="0"
+                  value={formEditar.merma_ag} onChange={e => setFormEditar(f => ({...f, merma_ag: e.target.value}))} />
+              </div>
+              <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                Gramos de metal perdidos en el proceso. Se registra al guardar solo si cambias estos valores.
+              </p>
+            </div>
+          </>
         )}
       </Modal>
 
@@ -642,7 +859,7 @@ function ProcesamientoTab() {
                       <td style={{ fontWeight: 700 }} className="mono">{m.codigo_lote}</td>
                       <td className="mono" style={{ fontSize: 'var(--fs-sm)' }}>{m.numero_volqueta}</td>
                       <td style={{ fontWeight: 600 }}>{m.mina ?? '—'}</td>
-                      <td style={{ fontSize: 'var(--fs-sm)' }}>{formatDate(m.fecha_llegada)}</td>
+                      <td style={{ fontSize: 'var(--fs-sm)' }}>{fmtDMY(m.fecha_llegada)}</td>
                       <td style={{ textAlign: 'right' }} className="mono">{num(m.peso_llegada_planta).toFixed(3)} t</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--green-700)' }} className="mono">{num(m.total_material_seco).toFixed(4)} t</td>
                       <td style={{ textAlign: 'right' }} className="mono">{num(m.tenor) > 0 ? `${num(m.tenor).toFixed(1)} gr/t` : <em style={{ color: 'var(--text-faint)' }}>S/A</em>}</td>

@@ -1,9 +1,10 @@
 // Cliente HTTP con fallback automático a datos mock cuando la API no responde
+import { getStoredToken } from '@/auth/session'
 
 const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3005/api/v1'
 
 function authHeaders(): HeadersInit {
-  const token = localStorage.getItem('token')
+  const token = getStoredToken()
   return token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' }
 }
 

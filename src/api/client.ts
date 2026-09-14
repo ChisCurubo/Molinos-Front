@@ -1,11 +1,12 @@
 import axios, { type AxiosError, type AxiosResponse } from 'axios'
+import { getStoredToken, clearSession } from '@/auth/session'
 
 const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3005/api/v1'
 
 export const http = axios.create({ baseURL: BASE, timeout: 8000 })
 
 http.interceptors.request.use(cfg => {
-  const token = localStorage.getItem('token')
+  const token = getStoredToken()
   if (token) cfg.headers.Authorization = `Bearer ${token}`
   return cfg
 })
@@ -14,7 +15,8 @@ http.interceptors.response.use(
   (res: AxiosResponse) => res,
   (err: AxiosError) => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('token')
+      // Token vencido/inválido → cerramos la sesión y forzamos el login.
+      clearSession()
       window.location.href = '/login'
     }
     return Promise.reject(err)

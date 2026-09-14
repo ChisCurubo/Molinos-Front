@@ -49,6 +49,8 @@ const GROUPS: NavGroup[] = [
       { to: '/materiales/procesamiento-api', label: 'Procesamiento',       icon: Layers       },
       { to: '/materiales/inventario-api', label: 'Inventario',             icon: Package      },
       { to: '/materiales/viajes-material-api', label: 'Viajes material',   icon: Send         },
+      { to: '/materiales/pago-material-api', label: 'Pago de material',    icon: Banknote     },
+      { to: '/materiales/pago-mulas-api', label: 'Pago de mulas',          icon: Container    },
       { to: '/materiales/catalogos-api',  label: 'Catálogos',              icon: Mountain     },
       { to: '/materiales/viajes-agua-api', label: 'Viajes de agua',        icon: Droplets     },
     ],

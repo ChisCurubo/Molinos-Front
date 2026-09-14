@@ -1,4 +1,50 @@
-import { apiFetch, apiPost, apiPut } from './client'
+import { apiFetch, apiPost, apiPut, apiDelete } from './client'
+
+function qs(params: Record<string, string | number | boolean | undefined>): string {
+  const q = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') q.set(k, String(v))
+  }
+  const s = q.toString()
+  return s ? `?${s}` : ''
+}
+
+// ─── Proveedores (usado por /pagos/mulas y otros módulos de pagos) ────────────
+export interface CategoriaProveedor {
+  id: number
+  nombre: string
+  descripcion?: string | null
+}
+
+export interface Proveedor {
+  id: number
+  nombre: string
+  id_categoria?: number | null
+  categoria?: string | null
+  contacto?: string | null
+  telefono?: string | null
+  ciudad?: string | null
+  alias?: string | null
+  nequi?: boolean | number
+  compra_realizada?: string | null
+  estado?: 'activo' | 'inactivo' | string
+}
+export interface ProveedorPayload {
+  nombre: string
+  id_categoria?: number
+  contacto?: string
+  telefono?: string
+  ciudad?: string
+  alias?: string
+  nequi?: boolean
+  compra_realizada?: string
+  estado?: string
+}
+export interface ProveedoresFiltro {
+  id_categoria?: number
+  estado?: string
+  q?: string
+}
 
 export const pagosApi = {
   // CxP - Cuentas por pagar
@@ -29,9 +75,13 @@ export const pagosApi = {
     apiPut<unknown>(`/pagos/prestamos-financieros/${id}`, body),
 
   // Proveedores
-  getProveedores: () => apiFetch<unknown[]>('/pagos/proveedores'),
-  createProveedor: (body: unknown) => apiPost<unknown>('/pagos/proveedores', body),
-  updateProveedor: (id: number, body: unknown) => apiPut<unknown>(`/pagos/proveedores/${id}`, body),
+  getProveedores: (filtro?: ProveedoresFiltro) =>
+    apiFetch<Proveedor[]>(`/pagos/proveedores${qs({ id_categoria: filtro?.id_categoria, estado: filtro?.estado, q: filtro?.q })}`),
+  getProveedor: (id: number) => apiFetch<Proveedor>(`/pagos/proveedores/${id}`),
+  createProveedor: (body: ProveedorPayload) => apiPost<Proveedor>('/pagos/proveedores', body),
+  updateProveedor: (id: number, body: Partial<ProveedorPayload>) => apiPut<Proveedor>(`/pagos/proveedores/${id}`, body),
+  deleteProveedor: (id: number) => apiDelete<{ message?: string }>(`/pagos/proveedores/${id}`),
+  getCategoriasProveedor: () => apiFetch<CategoriaProveedor[]>('/pagos/proveedores/categorias'),
 
   // Gastos
   getGastos: () => apiFetch<unknown[]>('/pagos/gastos'),

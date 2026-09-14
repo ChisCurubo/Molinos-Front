@@ -1,18 +1,34 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Plus, RefreshCw, Trash2, Truck } from 'lucide-react'
+import { ChevronDown, ChevronRight, FlaskConical, Lock, Pencil, Plus, RefreshCw, RotateCcw, Send, Trash2, Truck } from 'lucide-react'
 import { Button, Card, Input, KpiTile, Modal, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
 import { useCanWrite } from '@/hooks/usePermissions'
 import { apiError } from '@/api/client'
-import { formatCOP, formatDate, todayISO } from '@/utils/format'
+import { formatCOP, todayISO } from '@/utils/format'
 import {
   materialApi, num,
   type ViajeMaterial, type ViajeMaterialLinea, type ViajeMaterialResumen, type InvConcentradoRow,
   type ViajeTrazabilidad, type TrazaLinea,
 } from '@/api/material'
+import { viajesMaterialMock, type ViajeEstado, type ViajeMetaMock } from '@/api/viajesMaterialMock'
 
 const cop = formatCOP
 const thisMonth = new Date().toISOString().slice(0, 7)
+
+// Fecha corta dd/mm/aa para las tablas.
+function fmtDMY(iso: string | null | undefined) {
+  if (!iso) return '—'
+  const [y, m, d] = iso.slice(0, 10).split('-')
+  return `${d}/${m}/${y.slice(2)}`
+}
+
+// Estado del viaje (mock): etiqueta + clase de badge.
+const ESTADO_VIAJE: Record<ViajeEstado, { label: string; badge: string }> = {
+  abierto:  { label: 'Abierto',  badge: 'badge--warning' },
+  cerrado:  { label: 'Cerrado',  badge: 'badge--info'    },
+  enviado:  { label: 'Enviado',  badge: 'badge--success' },
+}
+const META_DEFAULT: ViajeMetaMock = { estado: 'abierto', fecha_salida: null, analisis: [] }
 
 // Tenor de oro del despacho (g Au por tonelada seca de concentrado).
 const tenorAu = (auGramos: number, toneladasSeco: number) => (toneladasSeco > 0 ? auGramos / toneladasSeco : 0)
@@ -22,40 +38,84 @@ const ESTADO_LOTE_BADGE: Record<string, string> = {
   parcialmente_enviado: 'badge--warning', enviado_completo: 'badge--success',
 }
 
-// Tabla de materiales de origen de un lote (aporte proporcional).
+// Fila key-value del desglose de un material.
+const Dato = ({ k, v, color }: { k: string; v: React.ReactNode; color?: string }) => (
+  <span>{k}: <strong style={color ? { color } : undefined}>{v}</strong></span>
+)
+
+// Tabla de materiales de origen de un lote (aporte proporcional). Cada material
+// se despliega y muestra su desglose de costos (el backend lo trae por material).
 function MaterialesTraza({ lineas, conLote }: { lineas: TrazaLinea[]; conLote?: boolean }) {
+  const [open, setOpen] = useState<Set<string>>(new Set())
+  const toggle = (k: string) => setOpen(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n })
   const rows = lineas.flatMap(ln => ln.materiales.map(m => ({ ...m, _lote: ln.codigo_lote })))
   if (rows.length === 0) return <p style={{ padding: '0.6rem 0.85rem', color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>Sin materiales de origen.</p>
+  const totAport = rows.reduce((s, m) => s + num(m.toneladas_aportadas), 0)
+  const totConc = rows.reduce((s, m) => s + num(m.concentrado_proporcional), 0)
+  const totMat = rows.reduce((s, m) => s + num(m.total_material), 0)
+  const totMaq = rows.reduce((s, m) => s + num(m.maquila_proporcional ?? m.maquila), 0)
+  const cols = (conLote ? 1 : 0) + 10 // chevron + [lote?] + 9 columnas
+  const cop2 = (v: unknown) => num(v) > 0 ? cop(num(v)) : '—'
   return (
-    <div className="table-wrap" style={{ border: 'none', borderRadius: 0 }}>
-      <table className="data-table" style={{ fontSize: 'var(--fs-xs)' }}>
+    <div className="table-wrap table-wrap--fit" style={{ border: 'none', borderRadius: 0 }}>
+      <table className="data-table data-table--fit" style={{ fontSize: 'var(--fs-xs)' }}>
         <thead><tr>
+          <th style={{ width: '1.4rem' }}></th>
           {conLote && <th>Lote</th>}
           <th>Vol.</th><th>Mina</th><th>Minero</th><th>Fecha</th>
           <th style={{ textAlign: 'right' }}>Tenor</th>
           <th style={{ textAlign: 'right' }}>T. aport.</th>
-          <th style={{ textAlign: 'right' }}>Seco aport.</th>
-          <th style={{ textAlign: 'right' }}>% aporte</th>
           <th style={{ textAlign: 'right' }}>Conc. aportado</th>
+          <th style={{ textAlign: 'right' }}>Total material</th>
           <th style={{ textAlign: 'right' }}>Maquila</th>
         </tr></thead>
         <tbody>
-          {rows.map(m => (
-            <tr key={`${m._lote}-${m.id_entrada}`}>
-              {conLote && <td style={{ fontWeight: 700 }} className="mono">{m._lote}</td>}
-              <td className="mono">{m.numero_volqueta}</td>
-              <td style={{ fontWeight: 600 }}>{m.mina ?? '—'}</td>
-              <td>{m.minero ?? '—'}</td>
-              <td>{formatDate(m.fecha_llegada)}</td>
-              <td style={{ textAlign: 'right' }} className="mono">{num(m.tenor) > 0 ? num(m.tenor).toFixed(1) : '—'}</td>
-              <td style={{ textAlign: 'right' }} className="mono">{num(m.toneladas_aportadas).toFixed(3)} t</td>
-              <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--green-700)' }} className="mono">{num(m.toneladas_seco_aportadas).toFixed(4)} t</td>
-              <td style={{ textAlign: 'right' }} className="mono">{m.porcentaje_aporte != null ? `${m.porcentaje_aporte.toFixed(1)}%` : '—'}</td>
-              <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">{num(m.concentrado_proporcional).toFixed(4)} t</td>
-              <td style={{ textAlign: 'right', color: 'var(--green-700)' }} className="mono">{num(m.maquila_proporcional) > 0 ? cop(num(m.maquila_proporcional)) : '—'}</td>
-            </tr>
-          ))}
+          {rows.map(m => {
+            const k = `${m._lote}-${m.id_entrada}`
+            const isOpen = open.has(k)
+            return (
+              <React.Fragment key={k}>
+                <tr style={{ cursor: 'pointer', ...(isOpen ? { background: 'var(--slate-50)' } : {}) }} onClick={() => toggle(k)}>
+                  <td style={{ color: 'var(--text-muted)' }}>{isOpen ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}</td>
+                  {conLote && <td style={{ fontWeight: 700 }} className="mono">{m._lote}</td>}
+                  <td className="mono">{m.numero_volqueta}</td>
+                  <td style={{ fontWeight: 600 }}>{m.mina ?? '—'}</td>
+                  <td>{m.minero ?? '—'}</td>
+                  <td>{fmtDMY(m.fecha_llegada)}</td>
+                  <td style={{ textAlign: 'right' }} className="mono">{num(m.tenor) > 0 ? num(m.tenor).toFixed(1) : '—'}</td>
+                  <td style={{ textAlign: 'right' }} className="mono">{num(m.toneladas_aportadas).toFixed(3)} t</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">{num(m.concentrado_proporcional).toFixed(4)} t</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--emerald-700)' }} className="mono">{cop2(m.total_material)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--green-700)' }} className="mono">{cop2(m.maquila_proporcional ?? m.maquila)}</td>
+                </tr>
+                {isOpen && (
+                  <tr style={{ background: 'var(--slate-50)' }}>
+                    <td colSpan={cols} style={{ padding: '0.4rem 0.85rem 0.7rem 2rem' }}>
+                      <div className="callout" style={{ margin: 0, display: 'flex', gap: '1.25rem', flexWrap: 'wrap', fontSize: 'var(--fs-xs)' }}>
+                        <Dato k="Seco aportado" v={`${num(m.toneladas_seco_aportadas).toFixed(4)} t`} />
+                        <Dato k="% aporte" v={m.porcentaje_aporte != null ? `${m.porcentaje_aporte.toFixed(1)}%` : '—'} />
+                        <Dato k="Costo material" v={cop2(m.costo_material)} />
+                        <Dato k="Gastos operativos" v={cop2(m.gastos_operativos)} />
+                        <Dato k="Total material" v={cop2(m.total_material)} color="var(--emerald-700)" />
+                        <Dato k="Excedente" v={cop2(m.excedente)} />
+                        <Dato k="Maquila" v={cop2(m.maquila_proporcional ?? m.maquila)} color="var(--green-700)" />
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            )
+          })}
         </tbody>
+        <tfoot>
+          <tr style={{ fontWeight: 700 }}>
+            <td colSpan={conLote ? 7 : 6}>Total ({rows.length})</td>
+            <td style={{ textAlign: 'right' }} className="mono">{totAport.toFixed(3)} t</td>
+            <td style={{ textAlign: 'right' }} className="mono">{totConc.toFixed(4)} t</td>
+            <td style={{ textAlign: 'right', color: 'var(--emerald-700)' }} className="mono">{totMat > 0 ? cop(totMat) : '—'}</td>
+            <td style={{ textAlign: 'right', color: 'var(--green-700)' }} className="mono">{totMaq > 0 ? cop(totMaq) : '—'}</td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   )
@@ -68,10 +128,10 @@ interface SelLinea {
   loteId: number
   codigo: string
   concepto: string
-  disp: number
+  disp: number       // disponible húmedo (referencia)
+  secoDisp: number   // seco del lote (referencia; se despacha en seco)
   auT: number
-  concentrado_humedo: string
-  valor_total: string
+  concentrado_seco: string  // seco a despachar; '' = todo lo disponible
   checked: boolean
 }
 
@@ -102,10 +162,21 @@ export function ViajesMaterialApiPage() {
   const [selLineas, setSelLineas] = useState<SelLinea[]>([])
   const [saving, setSaving] = useState(false)
 
-  // Editar (agregar / quitar líneas — lo que soporta la API)
-  const [editViaje, setEditViaje] = useState<ViajeMaterial | null>(null)
-  const [addOpen, setAddOpen] = useState(false)
+  // Agregar lotes inline (dentro de la fila expandida, como en Procesamiento)
+  const [addingId, setAddingId] = useState<number | null>(null)
   const [addSel, setAddSel] = useState<SelLinea[]>([])
+
+  // Estado / pago / análisis del viaje (MOCK — ver docs/viajes_material_mock.md)
+  const [metaMap, setMetaMap] = useState<Record<number, ViajeMetaMock>>({})
+  const metaOf = (id: number): ViajeMetaMock => metaMap[id] ?? META_DEFAULT
+
+  // Análisis del viaje (mock)
+  const [analisisViaje, setAnalisisViaje] = useState<ViajeMaterial | null>(null)
+  const [formAnalisis, setFormAnalisis] = useState({ numero_analisis: '', porcentaje_humedad: '13', au_gr_x_ton: '', ag_gr_x_ton: '', comentarios: '' })
+
+  // Editar cabecera (PATCH /material/viajes/:id)
+  const [editHdr, setEditHdr] = useState<ViajeMaterial | null>(null)
+  const [formHdr, setFormHdr] = useState({ numero_viaje: '', fecha: '', comentarios: '' })
 
   // Eliminar
   const [delViaje, setDelViaje] = useState<ViajeMaterial | null>(null)
@@ -142,6 +213,15 @@ export function ViajesMaterialApiPage() {
       .finally(() => setLoading(false))
   }, [])
   useEffect(() => { load() }, [load])
+
+  // Carga la meta (estado/pago/análisis) de los viajes que aún no la tienen.
+  useEffect(() => {
+    viajes.forEach(v => {
+      if (metaMap[v.id] === undefined) {
+        viajesMaterialMock.getMeta(v.id).then(m => setMetaMap(prev => ({ ...prev, [v.id]: m })))
+      }
+    })
+  }, [viajes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadLotesDisp = useCallback(() => {
     materialApi.getInventarioConcentrado()
@@ -184,8 +264,8 @@ export function ViajesMaterialApiPage() {
     if (wStep === 2 && selLineas.length === 0 && lotesDisp.length > 0) {
       setSelLineas(lotesDisp.map(l => ({
         loteId: l.id, codigo: l.codigo, concepto: '',
-        disp: num(l.toneladas_disponibles), auT: num(l.tenor_au),
-        concentrado_humedo: num(l.toneladas_disponibles).toFixed(2), valor_total: '0', checked: false,
+        disp: num(l.toneladas_disponibles), secoDisp: num(l.toneladas_seco), auT: num(l.tenor_au),
+        concentrado_seco: '', checked: false,
       })))
     }
   }, [wStep, lotesDisp, selLineas.length])
@@ -207,8 +287,7 @@ export function ViajesMaterialApiPage() {
       for (const s of seleccionadas) {
         await materialApi.addViajeLinea(idViaje, {
           id_material_concentrado: s.loteId,
-          total_concentrado_humedo: Number(s.concentrado_humedo) || undefined,
-          valor_total: Number(s.valor_total) || undefined,
+          concentrado_seco: Number(s.concentrado_seco) || undefined, // vacío = todo lo disponible
           concepto: s.concepto.trim() || undefined,
         })
       }
@@ -217,49 +296,100 @@ export function ViajesMaterialApiPage() {
     } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
   }
 
-  // ── Editar: agregar / quitar líneas ──
-  const abrirEdit = (v: ViajeMaterial) => { setEditViaje(v); setAddOpen(false) }
+  // ── Agregar / quitar líneas (inline en la fila expandida) ──
   const quitarLinea = async (v: ViajeMaterial, l: ViajeMaterialLinea) => {
     if (!confirm(`¿Quitar el lote ${l.codigo_lote ?? ''} del viaje ${v.numero_viaje}? Se devuelve el concentrado al lote.`)) return
     try {
       await materialApi.deleteViajeLinea(v.id, l.id)
-      const fresh = await materialApi.getViajeMaterial(v.id)
-      setEditViaje(fresh); load()
+      toast.success('Lote quitado del viaje'); load()
     } catch (e) { toast.error(apiError(e).message) }
   }
-  const abrirAgregarLotes = () => {
-    loadLotesDisp()
-    setAddSel([])
-    setAddOpen(true)
-  }
+  const abrirAgregarInline = (v: ViajeMaterial) => { setAddingId(v.id); setAddSel([]); loadLotesDisp() }
+  const cancelarAgregarInline = () => { setAddingId(null); setAddSel([]) }
   useEffect(() => {
-    if (addOpen && addSel.length === 0 && lotesDisp.length > 0 && editViaje) {
-      const yaEn = new Set(editViaje.lineas.map(l => l.id_material_concentrado))
+    if (addingId != null && addSel.length === 0 && lotesDisp.length > 0) {
+      const v = viajes.find(x => x.id === addingId)
+      const yaEn = new Set(v?.lineas.map(l => l.id_material_concentrado) ?? [])
       setAddSel(lotesDisp.filter(l => !yaEn.has(l.id)).map(l => ({
         loteId: l.id, codigo: l.codigo, concepto: '',
-        disp: num(l.toneladas_disponibles), auT: num(l.tenor_au),
-        concentrado_humedo: num(l.toneladas_disponibles).toFixed(2), valor_total: '0', checked: false,
+        disp: num(l.toneladas_disponibles), secoDisp: num(l.toneladas_seco), auT: num(l.tenor_au),
+        concentrado_seco: '', checked: false,
       })))
     }
-  }, [addOpen, lotesDisp, editViaje, addSel.length])
+  }, [addingId, lotesDisp, viajes, addSel.length])
   const updAddSel = (idx: number, patch: Partial<SelLinea>) =>
     setAddSel(prev => prev.map((s, i) => i === idx ? { ...s, ...patch } : s))
-  const confirmarAgregarLotes = async () => {
-    if (!editViaje) return
+  const confirmarAgregarInline = async () => {
+    if (addingId == null) return
     const sel = addSel.filter(s => s.checked)
     if (sel.length === 0) return
+    setSaving(true)
     try {
       for (const s of sel) {
-        await materialApi.addViajeLinea(editViaje.id, {
+        await materialApi.addViajeLinea(addingId, {
           id_material_concentrado: s.loteId,
-          total_concentrado_humedo: Number(s.concentrado_humedo) || undefined,
-          valor_total: Number(s.valor_total) || undefined,
+          concentrado_seco: Number(s.concentrado_seco) || undefined, // vacío = todo lo disponible
           concepto: s.concepto.trim() || undefined,
         })
       }
-      const fresh = await materialApi.getViajeMaterial(editViaje.id)
-      setEditViaje(fresh); setAddOpen(false); load()
-      toast.success('Lotes agregados')
+      toast.success('Lotes agregados'); setAddingId(null); setAddSel([]); load()
+    } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
+  }
+
+  // ── Estado del viaje (MOCK). El pago del material va aparte (módulo material). ──
+  const cambiarEstado = async (v: ViajeMaterial, estado: ViajeEstado) => {
+    try {
+      const m = await viajesMaterialMock.setEstado(v.id, estado)
+      setMetaMap(prev => ({ ...prev, [v.id]: m }))
+      toast.success(`Viaje ${ESTADO_VIAJE[estado].label.toLowerCase()}`)
+    } catch (e) { toast.error(apiError(e).message) }
+  }
+
+  // ── Editar cabecera (PATCH real) ──
+  const abrirEditarHdr = (v: ViajeMaterial) => {
+    setFormHdr({ numero_viaje: v.numero_viaje, fecha: (v.fecha ?? '').slice(0, 10), comentarios: v.comentarios ?? '' })
+    setEditHdr(v)
+  }
+  const guardarEditarHdr = async () => {
+    if (!editHdr || !formHdr.numero_viaje.trim()) return
+    setSaving(true)
+    try {
+      await materialApi.updateViaje(editHdr.id, {
+        numero_viaje: formHdr.numero_viaje.trim(),
+        fecha: formHdr.fecha || undefined,
+        comentarios: formHdr.comentarios.trim() || undefined,
+      })
+      toast.success('Viaje actualizado'); setEditHdr(null); load()
+    } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
+  }
+
+  // ── Análisis del viaje (MOCK) ──
+  const abrirAnalisis = (v: ViajeMaterial) => {
+    setFormAnalisis({ numero_analisis: '', porcentaje_humedad: '13', au_gr_x_ton: '', ag_gr_x_ton: '', comentarios: '' })
+    setAnalisisViaje(v)
+  }
+  const guardarAnalisis = async () => {
+    if (!analisisViaje) return
+    const au = Number(formAnalisis.au_gr_x_ton)
+    if (!formAnalisis.au_gr_x_ton || Number.isNaN(au) || au < 0) { toast.error('El Au (gr/t) debe ser un número ≥ 0'); return }
+    setSaving(true)
+    try {
+      const m = await viajesMaterialMock.addAnalisis(analisisViaje.id, {
+        numero_analisis: formAnalisis.numero_analisis.trim() || `AN-${analisisViaje.numero_viaje}`,
+        porcentaje_humedad: formAnalisis.porcentaje_humedad ? Number(formAnalisis.porcentaje_humedad) / 100 : null,
+        au_gr_x_ton: au,
+        ag_gr_x_ton: formAnalisis.ag_gr_x_ton ? Number(formAnalisis.ag_gr_x_ton) : null,
+        comentarios: formAnalisis.comentarios.trim() || null,
+      })
+      setMetaMap(prev => ({ ...prev, [analisisViaje.id]: m }))
+      toast.success('Análisis agregado (mock)')
+      setAnalisisViaje(null)
+    } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
+  }
+  const eliminarAnalisis = async (viajeId: number, analisisId: number) => {
+    try {
+      const m = await viajesMaterialMock.deleteAnalisis(viajeId, analisisId)
+      setMetaMap(prev => ({ ...prev, [viajeId]: m }))
     } catch (e) { toast.error(apiError(e).message) }
   }
 
@@ -326,7 +456,7 @@ export function ViajesMaterialApiPage() {
                       onClick={() => toggleTraza(v.id)}>
                       <td style={{ color: 'var(--text-muted)' }}>{isOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</td>
                       <td style={{ fontWeight: 700 }} className="mono">{v.numero_viaje}</td>
-                      <td style={{ fontSize: 'var(--fs-sm)' }}>{formatDate(v.fecha)}</td>
+                      <td style={{ fontSize: 'var(--fs-sm)' }}>{fmtDMY(v.fecha)}</td>
                       <td style={{ textAlign: 'right' }} className="mono">{v.lineas.length}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">{totHum.toFixed(2)} t</td>
                       <td style={{ textAlign: 'right' }} className="mono">{totSeco.toFixed(4)} t</td>
@@ -340,6 +470,17 @@ export function ViajesMaterialApiPage() {
                     {isOpen && (
                       <tr style={{ background: 'var(--slate-50)' }}>
                         <td colSpan={NUM_COLS_TRAZA} style={{ padding: '0.5rem 1rem 1rem 2rem' }}>
+                          {/* Agregados de venta de la cabecera del viaje */}
+                          <div className="callout" style={{ marginBottom: '0.75rem', display: 'flex', gap: '1.25rem', flexWrap: 'wrap', fontSize: 'var(--fs-xs)' }}>
+                            <Dato k="Costo material" v={cop(num(v.total_costo_material ?? v.valor_material_total))} />
+                            <Dato k="Maquila" v={cop(num(v.maquila ?? v.maquila_total))} color="var(--green-700)" />
+                            <Dato k="Total viaje" v={cop(v.total_viaje != null ? num(v.total_viaje) : material + maquila)} color="var(--emerald-700)" />
+                            <Dato k="Tenor Au venta" v={v.tenor_au_venta != null ? `${num(v.tenor_au_venta).toFixed(2)} g/t` : '—'} color="var(--amber-700)" />
+                            <Dato k="Tenor Ag" v={v.tenor_ag != null ? `${num(v.tenor_ag).toFixed(1)} g/t` : '—'} />
+                            <Dato k="Grs Au vendidos" v={v.total_grs_au_venta != null ? `${num(v.total_grs_au_venta).toFixed(1)} g` : '—'} />
+                            <Dato k="Grs Ag vendidos" v={v.total_grs_ag_venta != null ? `${num(v.total_grs_ag_venta).toFixed(0)} g` : '—'} />
+                            <Dato k="Au prom. compra" v={v.au_promedio_compra != null ? `${num(v.au_promedio_compra).toFixed(2)} g/t` : '—'} />
+                          </div>
                           {cargando ? (
                             <p style={{ color: 'var(--text-muted)', padding: '0.75rem 0', textAlign: 'center' }}>Cargando trazabilidad…</p>
                           ) : v.lineas.length === 0 ? (
@@ -473,15 +614,16 @@ export function ViajesMaterialApiPage() {
               value={fLote} onChange={e => setFLote(e.target.value)} style={{ maxWidth: '13rem' }} />
           </div>
 
-          <div className="table-wrap">
-            <table className="data-table">
+          <div className="table-wrap table-wrap--fit">
+            <table className="data-table data-table--fit">
               <thead>
                 <tr>
                   <th style={{ width: '1.5rem' }}></th>
-                  <th>N.° viaje</th><th>Fecha</th>
+                  <th>N.° viaje</th><th>Fechas</th><th>Estado</th>
                   <th style={{ textAlign: 'right' }}>T. Húm.</th>
+                  <th style={{ textAlign: 'right' }}>Material</th>
                   <th style={{ textAlign: 'right' }}>Maquila</th>
-                  <th style={{ textAlign: 'right' }}>Valor material</th>
+                  <th style={{ textAlign: 'right' }}>Total viaje</th>
                   <th style={{ textAlign: 'right' }}>Au (g)</th>
                   <th style={{ textAlign: 'right' }}>Ag (g)</th>
                   <th>Lotes</th>
@@ -490,24 +632,35 @@ export function ViajesMaterialApiPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={canWrite ? 10 : 9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Cargando…</td></tr>
+                  <tr><td colSpan={canWrite ? 12 : 11} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Cargando…</td></tr>
                 ) : viajesFiltrados.length === 0 ? (
-                  <tr><td colSpan={canWrite ? 10 : 9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Sin registros</td></tr>
+                  <tr><td colSpan={canWrite ? 12 : 11} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Sin registros</td></tr>
                 ) : viajesFiltrados.map(v => {
                   const isExp = expanded.has(v.id)
                   const totHum = num(v.total_concentrado_humedo)
                   const au = num(v.au_gramos_total), ag = num(v.ag_gramos_total)
-                  const maquila = num(v.maquila_total), material = num(v.valor_material_total)
+                  // Prefiere los nuevos agregados del backend. total_viaje = material + maquila (total real).
+                  const maquila = num(v.maquila ?? v.maquila_total)
+                  const material = num(v.total_costo_material ?? v.valor_material_total)
+                  const totalViaje = v.total_viaje != null ? num(v.total_viaje) : material + maquila
+                  const meta = metaOf(v.id)
+                  const editable = meta.estado === 'abierto'
+                  const analisis = meta.analisis
                   return (
                     <React.Fragment key={v.id}>
                       <tr style={{ cursor: 'pointer', ...(isExp ? { background: 'var(--slate-50)' } : {}) }}
                         onClick={() => toggleExpand(v.id)}>
                         <td style={{ color: 'var(--text-muted)' }}>{isExp ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</td>
                         <td style={{ fontWeight: 700 }} className="mono">{v.numero_viaje}</td>
-                        <td style={{ fontSize: 'var(--fs-sm)' }}>{formatDate(v.fecha)}</td>
+                        <td style={{ fontSize: 'var(--fs-sm)', lineHeight: 1.5 }} className="mono">
+                          <div title="Fecha de creación del viaje"><span className="date-tag date-tag--e">C</span>{fmtDMY(v.fecha)}</div>
+                          <div title="Fecha de salida (al marcar enviado)"><span className="date-tag date-tag--s">S</span>{meta.fecha_salida ? fmtDMY(meta.fecha_salida) : <em style={{ color: 'var(--text-faint)', fontStyle: 'normal' }}>—</em>}</div>
+                        </td>
+                        <td><span className={`badge ${ESTADO_VIAJE[meta.estado].badge}`}>{ESTADO_VIAJE[meta.estado].label}</span></td>
                         <td style={{ textAlign: 'right', fontWeight: 700 }} className="mono">{totHum.toFixed(2)} t</td>
-                        <td style={{ textAlign: 'right', color: 'var(--green-700)' }} className="mono">{cop(maquila)}</td>
                         <td style={{ textAlign: 'right' }} className="mono">{material > 0 ? cop(material) : '—'}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--green-700)' }} className="mono">{maquila > 0 ? cop(maquila) : '—'}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--emerald-700)' }} className="mono">{totalViaje > 0 ? cop(totalViaje) : '—'}</td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--amber-700)' }} className="mono">{au > 0 ? au.toFixed(1) : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--text-muted)' }} className="mono">{ag > 0 ? ag.toFixed(0) : '—'}</td>
                         <td>
@@ -517,9 +670,19 @@ export function ViajesMaterialApiPage() {
                         </td>
                         {canWrite && (
                           <td onClick={e => e.stopPropagation()}>
-                            <div className="row" style={{ gap: 4 }}>
-                              <Button variant="secondary" size="sm" icon={<Plus size={13}/>} title="Agregar/quitar lotes" onClick={() => abrirEdit(v)} />
-                              <Button variant="ghost" size="sm" icon={<Trash2 size={13}/>} onClick={() => setDelViaje(v)} />
+                            <div className="row" style={{ gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                              <Button variant="secondary" size="sm" icon={<Pencil size={13}/>} title="Editar cabecera" onClick={() => abrirEditarHdr(v)} />
+                              {meta.estado === 'abierto' && (
+                                <Button variant="secondary" size="sm" icon={<Lock size={13}/>} title="Cerrar viaje" onClick={() => cambiarEstado(v, 'cerrado')} />
+                              )}
+                              {meta.estado === 'cerrado' && <>
+                                <Button variant="secondary" size="sm" icon={<RotateCcw size={13}/>} title="Reabrir viaje" onClick={() => cambiarEstado(v, 'abierto')} />
+                                <Button size="sm" icon={<Send size={13}/>} title="Marcar como enviado" onClick={() => cambiarEstado(v, 'enviado')} />
+                              </>}
+                              {meta.estado === 'enviado' && (
+                                <Button variant="secondary" size="sm" icon={<RotateCcw size={13}/>} title="Revertir envío" onClick={() => cambiarEstado(v, 'cerrado')} />
+                              )}
+                              <Button variant="ghost" size="sm" icon={<Trash2 size={13}/>} title={editable ? 'Eliminar viaje' : 'Solo se puede eliminar un viaje abierto'} disabled={!editable} onClick={() => setDelViaje(v)} />
                             </div>
                           </td>
                         )}
@@ -527,12 +690,12 @@ export function ViajesMaterialApiPage() {
 
                       {isExp && (
                         <tr style={{ background: 'var(--slate-50)' }}>
-                          <td colSpan={canWrite ? 10 : 9} style={{ padding: '0.75rem 1rem 1rem 2rem' }}>
+                          <td colSpan={canWrite ? 12 : 11} style={{ padding: '0.75rem 1rem 1rem 2rem' }}>
                             <p style={{ fontWeight: 600, fontSize: 'var(--fs-sm)', marginBottom: '0.5rem' }}>
                               Líneas del viaje ({v.lineas.length}):
                             </p>
-                            <div className="table-wrap">
-                              <table className="data-table" style={{ fontSize: 'var(--fs-sm)' }}>
+                            <div className="table-wrap table-wrap--fit">
+                              <table className="data-table data-table--fit" style={{ fontSize: 'var(--fs-sm)' }}>
                                 <thead>
                                   <tr>
                                     <th>Lote</th><th>Concepto</th>
@@ -542,9 +705,13 @@ export function ViajesMaterialApiPage() {
                                     <th style={{ textAlign: 'right' }}>Valor mat.</th>
                                     <th style={{ textAlign: 'right' }}>Au (g)</th>
                                     <th style={{ textAlign: 'right' }}>Ag (g)</th>
+                                    {canWrite && editable && <th></th>}
                                   </tr>
                                 </thead>
                                 <tbody>
+                                  {v.lineas.length === 0 && (
+                                    <tr><td colSpan={canWrite && editable ? 9 : 8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem' }}>Sin lotes. Agrégalos abajo.</td></tr>
+                                  )}
                                   {v.lineas.map(l => {
                                     const auL = num(l.au_gramos), agL = num(l.ag_gramos)
                                     return (
@@ -557,6 +724,11 @@ export function ViajesMaterialApiPage() {
                                         <td style={{ textAlign: 'right' }} className="mono">{num(l.valor_total) > 0 ? cop(num(l.valor_total)) : '—'}</td>
                                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--amber-700)' }} className="mono">{auL > 0 ? auL.toFixed(1) : '—'}</td>
                                         <td style={{ textAlign: 'right' }} className="mono">{agL > 0 ? agL.toFixed(0) : '—'}</td>
+                                        {canWrite && editable && (
+                                          <td style={{ textAlign: 'center' }}>
+                                            <Button variant="ghost" size="sm" icon={<Trash2 size={13}/>} title="Quitar lote del viaje" onClick={() => quitarLinea(v, l)} />
+                                          </td>
+                                        )}
                                       </tr>
                                     )
                                   })}
@@ -570,9 +742,109 @@ export function ViajesMaterialApiPage() {
                                     <td style={{ textAlign: 'right' }} className="mono">{material > 0 ? cop(material) : '—'}</td>
                                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--amber-700)' }} className="mono">{au.toFixed(1)}</td>
                                     <td style={{ textAlign: 'right' }} className="mono">{ag.toFixed(0)}</td>
+                                    {canWrite && editable && <td />}
                                   </tr>
                                 </tfoot>
                               </table>
+                            </div>
+
+                            {/* Agregar lotes inline (solo viaje abierto) */}
+                            {canWrite && editable && (
+                              <div style={{ marginTop: '0.85rem' }}>
+                                {addingId !== v.id ? (
+                                  <Button size="sm" variant="secondary" icon={<Plus size={14}/>} onClick={() => abrirAgregarInline(v)}>Agregar lotes</Button>
+                                ) : (
+                                  <div className="callout" style={{ background: '#fff' }}>
+                                    <p style={{ fontWeight: 600, fontSize: 'var(--fs-sm)', marginBottom: '0.5rem' }}>Concentrado disponible en canoa</p>
+                                    {addSel.length === 0 ? (
+                                      <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', padding: '0.5rem 0' }}>No hay lotes con concentrado disponible.</p>
+                                    ) : (
+                                      <div className="table-wrap table-wrap--fit" style={{ maxHeight: '18rem', overflowY: 'auto' }}>
+                                        <table className="data-table data-table--fit" style={{ fontSize: 'var(--fs-sm)' }}>
+                                          <thead>
+                                            <tr>
+                                              <th style={{ width: '2rem' }}></th>
+                                              <th>Lote</th>
+                                              <th style={{ textAlign: 'right' }}>Seco disp. (t)</th>
+                                              <th style={{ textAlign: 'right' }}>Au (g/t)</th>
+                                              <th style={{ textAlign: 'right' }}>Seco a despachar (t)</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {addSel.map((s, i) => (
+                                              <tr key={s.loteId} style={{ background: s.checked ? 'var(--green-50)' : undefined, cursor: 'pointer' }}
+                                                onClick={() => updAddSel(i, { checked: !s.checked })}>
+                                                <td><input type="checkbox" checked={s.checked} onChange={e => updAddSel(i, { checked: e.target.checked })} onClick={e => e.stopPropagation()} /></td>
+                                                <td style={{ fontWeight: 700 }} className="mono">{s.codigo}</td>
+                                                <td style={{ textAlign: 'right' }} className="mono">{s.secoDisp.toFixed(4)}</td>
+                                                <td style={{ textAlign: 'right' }} className="mono">{s.auT > 0 ? s.auT.toFixed(1) : '—'}</td>
+                                                <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                                                  <input type="number" step="0.0001" max={s.secoDisp || undefined} disabled={!s.checked} placeholder="todo"
+                                                    style={{ fontSize: 'var(--fs-sm)', padding: '0.2rem 0.4rem', border: '1px solid var(--border)', borderRadius: 4, textAlign: 'right', width: '6.5rem', background: s.checked ? undefined : 'var(--slate-50)' }}
+                                                    value={s.concentrado_seco} onChange={e => updAddSel(i, { concentrado_seco: e.target.value })} />
+                                                </td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    )}
+                                    <div className="row" style={{ gap: 8, marginTop: '0.75rem' }}>
+                                      <Button size="sm" variant="secondary" onClick={cancelarAgregarInline}>Cancelar</Button>
+                                      <Button size="sm" onClick={confirmarAgregarInline} disabled={!addSel.some(s => s.checked) || saving}>
+                                        {saving ? 'Agregando…' : `Agregar (${addSel.filter(s => s.checked).length})`}
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Análisis del viaje (MOCK) */}
+                            <div style={{ marginTop: '1rem' }}>
+                              <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: '0.5rem' }}>
+                                <p style={{ fontWeight: 600, fontSize: 'var(--fs-sm)', margin: 0 }}>
+                                  <FlaskConical size={14} style={{ verticalAlign: 'middle', marginRight: 4, color: 'var(--green-700)' }} />
+                                  Análisis del viaje ({analisis.length})
+                                </p>
+                                <span className="badge badge--neutral" style={{ fontSize: '0.58rem' }}>mock</span>
+                                <div style={{ flex: 1 }} />
+                                {canWrite && <Button size="sm" variant="secondary" icon={<Plus size={14}/>} onClick={() => abrirAnalisis(v)}>Agregar análisis</Button>}
+                              </div>
+                              {analisis.length === 0 ? (
+                                <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 0 }}>Sin análisis registrados para este viaje.</p>
+                              ) : (
+                                <div className="table-wrap table-wrap--fit" style={{ background: '#fff' }}>
+                                  <table className="data-table data-table--fit" style={{ fontSize: 'var(--fs-sm)' }}>
+                                    <thead>
+                                      <tr>
+                                        <th>N.° análisis</th>
+                                        <th style={{ textAlign: 'right' }}>Au (g/t)</th>
+                                        <th style={{ textAlign: 'right' }}>Ag (g/t)</th>
+                                        <th style={{ textAlign: 'right' }}>Humedad</th>
+                                        <th>Comentarios</th>
+                                        {canWrite && <th></th>}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {analisis.map(a => (
+                                        <tr key={a.id}>
+                                          <td className="mono">{a.numero_analisis}</td>
+                                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--amber-700)' }} className="mono">{a.au_gr_x_ton != null ? a.au_gr_x_ton.toFixed(2) : '—'}</td>
+                                          <td style={{ textAlign: 'right' }} className="mono">{a.ag_gr_x_ton != null ? a.ag_gr_x_ton.toFixed(0) : '—'}</td>
+                                          <td style={{ textAlign: 'right' }} className="mono">{a.porcentaje_humedad != null ? `${(a.porcentaje_humedad * 100).toFixed(1)}%` : '—'}</td>
+                                          <td style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>{a.comentarios ?? '—'}</td>
+                                          {canWrite && (
+                                            <td style={{ textAlign: 'center' }}>
+                                              <Button variant="ghost" size="sm" icon={<Trash2 size={13}/>} title="Eliminar análisis" onClick={() => eliminarAnalisis(v.id, a.id)} />
+                                            </td>
+                                          )}
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -625,9 +897,8 @@ export function ViajesMaterialApiPage() {
                     <tr>
                       <th style={{ width: '2rem' }}></th>
                       <th>Lote</th><th>Concepto / Mineros</th>
-                      <th style={{ textAlign: 'right' }}>Disp. (t)</th>
-                      <th style={{ textAlign: 'right' }}>A despachar (t)</th>
-                      <th style={{ textAlign: 'right' }}>Valor mat. ($)</th>
+                      <th style={{ textAlign: 'right' }}>Seco disp. (t)</th>
+                      <th style={{ textAlign: 'right' }}>Seco a despachar (t)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -640,16 +911,11 @@ export function ViajesMaterialApiPage() {
                             style={{ fontSize: 'var(--fs-sm)', padding: '0.2rem 0.4rem', border: '1px solid var(--border)', borderRadius: 4, width: '100%', minWidth: '10rem', background: s.checked ? undefined : 'var(--slate-50)' }}
                             value={s.concepto} onChange={e => updLinea(i, 'concepto', e.target.value)} />
                         </td>
-                        <td style={{ textAlign: 'right' }} className="mono">{s.disp.toFixed(2)}</td>
+                        <td style={{ textAlign: 'right' }} className="mono">{s.secoDisp.toFixed(4)}</td>
                         <td style={{ textAlign: 'right' }}>
-                          <input type="number" step="0.01" max={s.disp} disabled={!s.checked}
-                            style={{ fontSize: 'var(--fs-sm)', padding: '0.2rem 0.4rem', border: '1px solid var(--border)', borderRadius: 4, textAlign: 'right', width: '5rem', background: s.checked ? undefined : 'var(--slate-50)' }}
-                            value={s.concentrado_humedo} onChange={e => updLinea(i, 'concentrado_humedo', e.target.value)} />
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <input type="number" step="1000" disabled={!s.checked}
-                            style={{ fontSize: 'var(--fs-sm)', padding: '0.2rem 0.4rem', border: '1px solid var(--border)', borderRadius: 4, textAlign: 'right', width: '7rem', background: s.checked ? undefined : 'var(--slate-50)' }}
-                            value={s.valor_total} onChange={e => updLinea(i, 'valor_total', e.target.value)} />
+                          <input type="number" step="0.0001" max={s.secoDisp || undefined} disabled={!s.checked} placeholder="todo"
+                            style={{ fontSize: 'var(--fs-sm)', padding: '0.2rem 0.4rem', border: '1px solid var(--border)', borderRadius: 4, textAlign: 'right', width: '6.5rem', background: s.checked ? undefined : 'var(--slate-50)' }}
+                            value={s.concentrado_seco} onChange={e => updLinea(i, 'concentrado_seco', e.target.value)} />
                         </td>
                       </tr>
                     ))}
@@ -660,98 +926,58 @@ export function ViajesMaterialApiPage() {
             {seleccionadas.length > 0 && (
               <div className="callout" style={{ marginTop: '0.75rem' }}>
                 <strong>{seleccionadas.length} lote{seleccionadas.length !== 1 ? 's' : ''}</strong>
-                {' · '}T. húm.: <strong>{seleccionadas.reduce((s, l) => s + Number(l.concentrado_humedo), 0).toFixed(2)} t</strong>
-                {' · '}La maquila la calcula el servidor al despachar.
+                {' · '}Se despacha en <strong>seco</strong>; vacío = todo lo disponible.
+                {' · '}Maquila y valor los calcula el servidor.
               </div>
             )}
           </>
         )}
       </Modal>
 
-      {/* ── Modal: Editar (agregar/quitar líneas) ── */}
-      <Modal open={!!editViaje} title={`Editar viaje — ${editViaje?.numero_viaje ?? ''}`}
-        onClose={() => { setEditViaje(null); setAddOpen(false) }}
-        footer={<Button onClick={() => { setEditViaje(null); setAddOpen(false) }}>Cerrar</Button>}>
-        {editViaje && (
-          <>
-            <p style={{ fontWeight: 600, fontSize: 'var(--fs-sm)', marginBottom: '0.5rem' }}>Lotes del viaje</p>
-            <div className="table-wrap">
-              <table className="data-table" style={{ fontSize: 'var(--fs-sm)' }}>
-                <thead>
-                  <tr>
-                    <th>Lote</th>
-                    <th style={{ textAlign: 'right' }}>T. Húm.</th>
-                    <th style={{ textAlign: 'right' }}>Valor mat.</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {editViaje.lineas.length === 0 && (
-                    <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem' }}>Sin lotes. Agrega uno abajo.</td></tr>
-                  )}
-                  {editViaje.lineas.map(l => (
-                    <tr key={l.id}>
-                      <td style={{ fontWeight: 700 }} className="mono">{l.codigo_lote}</td>
-                      <td style={{ textAlign: 'right' }} className="mono">{num(l.concentrado_humedo).toFixed(2)} t</td>
-                      <td style={{ textAlign: 'right' }} className="mono">{num(l.valor_total) > 0 ? cop(num(l.valor_total)) : '—'}</td>
-                      <td style={{ textAlign: 'center' }}>
-                        <Button variant="ghost" size="sm" icon={<Trash2 size={13}/>} title="Quitar lote del viaje" onClick={() => quitarLinea(editViaje, l)} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div style={{ marginTop: '1rem' }}>
-              <Button size="sm" variant="secondary" icon={<Plus size={14}/>} onClick={abrirAgregarLotes}>Agregar lotes</Button>
-            </div>
-            <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: '0.75rem' }}>
-              Agregar o quitar lotes actualiza el stock del lote automáticamente en el servidor.
-            </p>
-          </>
+      {/* ── Modal: Editar cabecera del viaje ── */}
+      <Modal open={!!editHdr} title={`Editar viaje — ${editHdr?.numero_viaje ?? ''}`}
+        onClose={() => setEditHdr(null)}
+        footer={<>
+          <Button variant="secondary" onClick={() => setEditHdr(null)}>Cancelar</Button>
+          <Button onClick={guardarEditarHdr} disabled={!formHdr.numero_viaje.trim() || saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
+        </>}>
+        {editHdr && (
+          <div className="grid grid--form">
+            <Input label="N.° de viaje" required value={formHdr.numero_viaje}
+              onChange={e => setFormHdr(f => ({ ...f, numero_viaje: e.target.value }))} />
+            <Input label="Fecha" type="date" value={formHdr.fecha}
+              onChange={e => setFormHdr(f => ({ ...f, fecha: e.target.value }))} />
+            <Input label="Comentarios" value={formHdr.comentarios}
+              onChange={e => setFormHdr(f => ({ ...f, comentarios: e.target.value }))} style={{ gridColumn: '1/-1' }} />
+          </div>
         )}
       </Modal>
 
-      {/* ── Modal: Agregar lotes (selección) ── */}
-      <Modal open={addOpen} title="Agregar lotes al viaje" onClose={() => setAddOpen(false)}
+      {/* ── Modal: Agregar análisis al viaje (MOCK) ── */}
+      <Modal open={!!analisisViaje} title={`Agregar análisis — Viaje ${analisisViaje?.numero_viaje ?? ''}`}
+        onClose={() => setAnalisisViaje(null)}
         footer={<>
-          <Button variant="secondary" onClick={() => setAddOpen(false)}>Cancelar</Button>
-          <Button onClick={confirmarAgregarLotes} disabled={!addSel.some(s => s.checked)}>
-            Agregar ({addSel.filter(s => s.checked).length})
-          </Button>
+          <Button variant="secondary" onClick={() => setAnalisisViaje(null)}>Cancelar</Button>
+          <Button onClick={guardarAnalisis} disabled={!formAnalisis.au_gr_x_ton || saving}>{saving ? 'Guardando…' : 'Guardar análisis'}</Button>
         </>}>
-        {addSel.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '1.5rem 0' }}>No hay lotes con concentrado disponible.</p>
-        ) : (
-          <div className="table-wrap" style={{ maxHeight: '22rem' }}>
-            <table className="data-table" style={{ fontSize: 'var(--fs-sm)' }}>
-              <thead>
-                <tr>
-                  <th style={{ width: '2rem' }}></th>
-                  <th>Lote</th>
-                  <th style={{ textAlign: 'right' }}>Disponible</th>
-                  <th style={{ textAlign: 'right' }}>Au (g/t)</th>
-                  <th style={{ textAlign: 'right' }}>A despachar (t)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {addSel.map((s, i) => (
-                  <tr key={s.loteId} style={{ background: s.checked ? 'var(--green-50)' : undefined, cursor: 'pointer' }}
-                    onClick={() => updAddSel(i, { checked: !s.checked })}>
-                    <td><input type="checkbox" checked={s.checked} onChange={e => updAddSel(i, { checked: e.target.checked })} onClick={e => e.stopPropagation()} /></td>
-                    <td style={{ fontWeight: 700 }} className="mono">{s.codigo}</td>
-                    <td style={{ textAlign: 'right' }} className="mono">{s.disp.toFixed(2)} t</td>
-                    <td style={{ textAlign: 'right' }} className="mono">{s.auT > 0 ? s.auT.toFixed(1) : '—'}</td>
-                    <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-                      <input type="number" step="0.01" max={s.disp} disabled={!s.checked}
-                        style={{ fontSize: 'var(--fs-sm)', padding: '0.25rem 0.5rem', border: '1px solid var(--border-default)', borderRadius: 6, textAlign: 'right', width: '6.5rem', background: s.checked ? undefined : 'var(--slate-50)' }}
-                        value={s.concentrado_humedo} onChange={e => updAddSel(i, { concentrado_humedo: e.target.value })} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        {analisisViaje && (
+          <>
+            <div className="callout" style={{ marginBottom: '1rem' }}>
+              <strong>Función simulada (mock).</strong> Se guarda localmente mientras el backend expone los análisis del viaje. Ver <em>docs/viajes_material_mock.md</em>.
+            </div>
+            <div className="grid grid--form">
+              <Input label="N.° análisis" placeholder={`AN-${analisisViaje.numero_viaje}`}
+                value={formAnalisis.numero_analisis} onChange={e => setFormAnalisis(f => ({ ...f, numero_analisis: e.target.value }))} />
+              <Input label="Humedad (%)" type="number" step="0.1" placeholder="13"
+                value={formAnalisis.porcentaje_humedad} onChange={e => setFormAnalisis(f => ({ ...f, porcentaje_humedad: e.target.value }))} />
+              <Input label="Au (gr/t)" type="number" step="0.01" required placeholder="Ej: 45.5"
+                value={formAnalisis.au_gr_x_ton} onChange={e => setFormAnalisis(f => ({ ...f, au_gr_x_ton: e.target.value }))} />
+              <Input label="Ag (gr/t, opcional)" type="number" step="1" placeholder="Ej: 120"
+                value={formAnalisis.ag_gr_x_ton} onChange={e => setFormAnalisis(f => ({ ...f, ag_gr_x_ton: e.target.value }))} />
+              <Input label="Comentarios (opcional)" value={formAnalisis.comentarios}
+                onChange={e => setFormAnalisis(f => ({ ...f, comentarios: e.target.value }))} style={{ gridColumn: '1/-1' }} />
+            </div>
+          </>
         )}
       </Modal>
 
@@ -761,7 +987,7 @@ export function ViajesMaterialApiPage() {
         {delViaje && (
           <>
             <p style={{ marginBottom: '0.75rem' }}>
-              ¿Eliminar el viaje <strong>{delViaje.numero_viaje}</strong> del {formatDate(delViaje.fecha)}?
+              ¿Eliminar el viaje <strong>{delViaje.numero_viaje}</strong> del {fmtDMY(delViaje.fecha)}?
             </p>
             <div className="callout">
               <p style={{ fontSize: 'var(--fs-sm)' }}>El concentrado de los lotes será restaurado en el servidor:</p>

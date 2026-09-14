@@ -4,7 +4,7 @@ import { DataProvider } from '@/context/DataContext'
 import { MaterialesProvider } from '@/context/MaterialesContext'
 import { AccessibilityProvider } from '@/context/AccessibilityContext'
 import { AppLayout } from '@/components/layout/AppLayout'
-import { ProtectedRoute } from '@/components/layout/ProtectedRoute'
+import { ProtectedRoute, AuthLoading } from '@/components/layout/ProtectedRoute'
 import { LoginPage } from '@/pages/auth/LoginPage'
 import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage'
 import { ResetPasswordPage } from '@/pages/auth/ResetPasswordPage'
@@ -29,6 +29,8 @@ import { ViajesMaterialPage } from '@/pages/materiales/ViajesMaterialPage'
 import { ViajesMaterialApiPage } from '@/pages/materiales/ViajesMaterialApiPage'
 import { MulasPage } from '@/pages/materiales/MulasPage'
 import { PagoMaterialPage } from '@/pages/materiales/PagoMaterialPage'
+import { PagoMaterialApiPage } from '@/pages/materiales/PagoMaterialApiPage'
+import { PagoMulasApiPage } from '@/pages/materiales/PagoMulasApiPage'
 import { FinanzasPage } from '@/pages/finanzas/FinanzasPage'
 import { PrestamosFinancierosPage } from '@/pages/finanzas/PrestamosFinancierosPage'
 import { InformesFinanzasPage } from '@/pages/finanzas/InformesFinanzasPage'
@@ -46,7 +48,8 @@ import type { ReactNode } from 'react'
 
 /** Redirige al panel si ya hay sesión (para /login, /recuperar, etc.). */
 function PublicOnly({ children }: { children: ReactNode }) {
-  const { user } = useAuth()
+  const { user, initializing } = useAuth()
+  if (initializing) return <AuthLoading />
   return user ? <Navigate to="/" replace /> : <>{children}</>
 }
 
@@ -79,6 +82,10 @@ function AppRoutes() {
         <Route path="/materiales/procesamiento-api" element={<ProtectedRoute module="materiales"><ProcesamientoApiPage /></ProtectedRoute>} />
         <Route path="/materiales/inventario-api" element={<ProtectedRoute module="materiales"><InventarioApiPage /></ProtectedRoute>} />
         <Route path="/materiales/viajes-material-api" element={<ProtectedRoute module="materiales"><ViajesMaterialApiPage /></ProtectedRoute>} />
+        <Route path="/materiales/pago-material-api" element={<ProtectedRoute module="materiales"><PagoMaterialApiPage /></ProtectedRoute>} />
+        <Route path="/materiales/pago-mulas-api" element={<ProtectedRoute module="materiales"><PagoMulasApiPage /></ProtectedRoute>} />
+        <Route path="/materiales/pago-agua-api" element={<Navigate to="/materiales/viajes-agua-api" replace />} />
+        <Route path="/materiales/pago-flete-api" element={<Navigate to="/materiales/volquetas-api" replace />} />
         <Route path="/materiales/mulas" element={<ProtectedRoute module="materiales"><MulasPage /></ProtectedRoute>} />
         <Route path="/materiales/pago-material" element={<ProtectedRoute module="materiales"><PagoMaterialPage /></ProtectedRoute>} />
         <Route path="/materiales/informes" element={<ProtectedRoute module="materiales"><InformesMaterialPage /></ProtectedRoute>} />

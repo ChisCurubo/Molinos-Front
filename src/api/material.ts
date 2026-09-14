@@ -798,9 +798,11 @@ export type EstadoLote = 'en_proceso' | 'en_canoa' | 'parcialmente_enviado' | 'e
 
 // ─── 6.1 Inventario ───────────────────────────────────────────────────────────
 export interface InvCrudoRow {
-  id: number
+  /** ⚠️ El backend expone el id de la entrada como `id_entrada` (no `id`).
+   *  Es el que se manda en `id_entradas` al procesar un lote. */
+  id_entrada: number
   numero_volqueta: number
-  id_mina: number | null
+  id_mina?: number | null
   mina: string | null
   id_tipo_material: number | null
   tipo_material: string | null
@@ -851,6 +853,15 @@ export interface InventarioResumen {
   crudo_seco_total: Dec
 }
 
+/** `GET /material/inventario/lote/:id` — resumen del inventario de un lote. */
+export interface InventarioLoteResumen {
+  id?: number
+  num_materiales: number
+  total_seco_procesado: Dec
+  inventario_disponible: Dec
+  inventario_estado: string
+}
+
 // ─── 6.2 Procesamiento / lotes de concentrado ─────────────────────────────────
 export interface LoteConcentradoRow {
   id: number
@@ -877,6 +888,12 @@ export interface LoteConcentradoRow {
   ag_gr_x_ton: Dec | null
   au_concentrado: Dec | null
   ag_concentrado: Dec | null
+  // Fechas ya formateadas (dd/mm/aa) y precio total del lote (§7/§8).
+  fecha_inicio_fmt?: string | null
+  fecha_fin_fmt?: string | null
+  precio_total_material?: Dec | null
+  total_material_con_costos?: Dec | null
+  tenor?: Dec | null
 }
 
 export interface LoteMaterialVinculado {
@@ -890,12 +907,19 @@ export interface LoteMaterialVinculado {
   tenor: Dec | null
   toneladas_aportadas: Dec | null
   toneladas_seco_aportadas: Dec | null
+  // Aporte proporcional dentro del lote (§7).
+  fraccion_procesada?: Dec | null
+  concentrado_proporcional?: Dec | null   // concentrado que aportó este material
+  maquila_proporcional?: Dec | null
+  costo_maquila?: Dec | null
+  precio_material_lote?: Dec | null        // precio de ese material dentro del lote
 }
 
 export interface LoteConcentradoDetalle extends LoteConcentradoRow {
   created_at: string
   updated_at: string
   materiales: LoteMaterialVinculado[]
+  analisis?: AnalisisConcentrado[]
 }
 
 /** Análisis del concentrado de un lote (tenor real). */
@@ -959,6 +983,10 @@ export interface ProcesamientoQuery {
 export interface ConcentradoCreatePayload {
   codigo: string
   fecha_inicio: string
+  hizo_molienda?: boolean | number
+  hizo_flotacion?: boolean | number
+  hizo_relave?: boolean | number
+  hizo_filtroprensa?: boolean | number
 }
 
 export interface ConcentradoProcesarPayload {
@@ -966,9 +994,26 @@ export interface ConcentradoProcesarPayload {
   toneladas_procesadas_seco: number
 }
 
-export interface ConcentradoCerrarPayload {
+/** Respuesta de `POST .../:id/procesar`: incluye el acumulado tras vincular. */
+export interface ConcentradoProcesarResult {
+  filas?: unknown[]
+  total_seco_agregado: Dec
+  material_seco_procesado: Dec           // ACUMULADO seco del lote
+  precio_maquila_por_ton: Dec | null
+  maquila_total: Dec | null              // provisional
+}
+
+/** Corregir el concentrado de un lote YA cerrado (en_canoa). */
+export interface ConcentradoCorregirPayload {
   toneladas_humedo: number
   porcentaje_humedad: number
+  ubicacion_canoa?: string
+}
+
+export interface ConcentradoCerrarPayload {
+  toneladas_humedo: number
+  /** Opcional: si no se envía, el backend usa la humedad conocida (p.ej. del análisis). */
+  porcentaje_humedad?: number
   fecha_fin: string
   hizo_molienda?: boolean
   hizo_flotacion?: boolean
@@ -996,6 +1041,20 @@ export interface AnalisisConcentradoPayload {
   porcentaje_humedad: number
   au_concentrado: number
   ag_concentrado?: number
+}
+
+/** GET /material/concentrado/:id/merma — merma en gramos de metal del lote. */
+export interface MermaConcentrado {
+  id: number
+  codigo: string
+  merma_au: Dec | null
+  merma_ag: Dec | null
+}
+
+/** PATCH /material/concentrado/:id/merma — enviar solo lo que cambie (número ≥ 0). */
+export interface MermaPayload {
+  merma_au?: number
+  merma_ag?: number
 }
 
 // ─── 6.3 Viajes de material ───────────────────────────────────────────────────
@@ -1027,6 +1086,16 @@ export interface ViajeMaterial {
   valor_material_total: Dec
   au_gramos_total: Dec
   ag_gramos_total: Dec
+  // Nuevos agregados de la cabecera (el backend ya los devuelve).
+  // ⚠️ total_costo_material NO incluye maquila; el total real es total_viaje.
+  total_costo_material?: Dec        // solo material (sin maquila)
+  maquila?: Dec                     // maquila del viaje
+  total_viaje?: Dec                 // material + maquila (total real)
+  tenor_au_venta?: Dec
+  tenor_ag?: Dec
+  total_grs_au_venta?: Dec
+  total_grs_ag_venta?: Dec
+  au_promedio_compra?: Dec
   lineas: ViajeMaterialLinea[]
 }
 
@@ -1068,6 +1137,12 @@ export interface TrazaMaterial {
   concentrado_proporcional: Dec | null // cuánto concentrado aportó ese material
   maquila_proporcional: Dec | null
   porcentaje_aporte: number | null      // % sobre el seco del lote
+  // Desglose de costos por material (el backend ya lo devuelve).
+  costo_material?: Dec | null          // solo material
+  gastos_operativos?: Dec | null
+  total_material?: Dec | null          // material + gastos operativos
+  excedente?: Dec | null               // aparte (no incluido en total_material)
+  maquila?: Dec | null                 // para comprobar sumas
 }
 
 /** Línea (lote) del viaje con sus materiales de origen. */
@@ -1116,18 +1191,92 @@ export interface ViajesMaterialQuery {
   offset?: number
 }
 
+/** `GET /material/viajes/disponibles-mula` — viajes en estado `almacenado` con al menos una línea cargada. */
+export interface ViajeDisponibleMula {
+  id: number
+  numero_viaje: string | number
+  fecha: string
+  estado: string
+  num_lineas: number
+  toneladas_seco: number | string
+}
+
 // ─── Escrituras de viajes (payloads) ──────────────────────────────────────────
+/** POST /viajes — el body real es solo `numero_viaje` (fecha/comentarios opcionales). */
 export interface ViajeCreatePayload {
   numero_viaje: string
-  fecha: string
+  fecha?: string
   comentarios?: string
 }
 
+/** PATCH /viajes/:id — editar cabecera. */
+export interface ViajeUpdatePayload {
+  numero_viaje?: string
+  fecha?: string
+  comentarios?: string
+}
+
+/** POST /viajes/:id/lineas — asignar lote. Se despacha en SECO (`concentrado_seco`);
+ *  si se omite, despacha todo lo disponible. NO enviar valor_total (lo deriva el back). */
 export interface ViajeLineaPayload {
   id_material_concentrado: number
-  total_concentrado_humedo?: number
+  concentrado_seco?: number
+  concepto?: string
+}
+
+/** PATCH /viajes/:idViaje/lineas/:idLinea — ajusta el seco (stock por diferencia). */
+export interface ViajeLineaUpdatePayload {
+  concentrado_seco?: number
   valor_total?: number
   concepto?: string
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 6.4 · TARIFAS DE PROCESO (maquila) — /material/tarifas-proceso
+// Precio de maquila por tipo de proceso. "Actualizar precio" (POST) versiona:
+// cierra la tarifa vigente anterior del código y crea una nueva vigente.
+// "Corregir" (PATCH) edita la fila existente (solo para errores de digitación).
+// El backend responde { success, data } / { success:false, error }.
+// ════════════════════════════════════════════════════════════════════════════
+
+export type CodigoTarifaProceso = 'PROCESO_NORMAL' | 'PROCESO_RELAVE' | 'SOLO_FILTROPRENSA'
+
+export interface TarifaProceso {
+  id: number
+  codigo: CodigoTarifaProceso | string
+  descripcion: string | null
+  valor: Dec                 // string decimal desde MySQL → usar num()
+  unidad: string | null
+  fecha_desde: string        // YYYY-MM-DD
+  fecha_hasta: string | null // null = vigente
+  activo: boolean | number   // 1/0
+  created_at: string
+  updated_at: string
+}
+
+/** Filtros del histórico completo (GET /). */
+export interface TarifasProcesoHistQuery {
+  codigo?: CodigoTarifaProceso | string
+  activo?: 0 | 1
+}
+
+/** POST / — actualizar precio (cierra la anterior y crea una versión nueva). */
+export interface TarifaProcesoUpdatePrecioPayload {
+  codigo: CodigoTarifaProceso | string
+  valor: number
+  fecha_desde?: string
+  descripcion?: string
+  unidad?: string
+}
+
+/** PATCH /:id — corregir una fila existente (arreglar errores de digitación). */
+export interface TarifaProcesoCorregirPayload {
+  valor?: number
+  descripcion?: string
+  unidad?: string
+  fecha_desde?: string
+  fecha_hasta?: string | null
+  activo?: boolean | number
 }
 
 // ─── Helper de querystring ───────────────────────────────────────────────────
@@ -1287,7 +1436,7 @@ export const materialApi = {
   // ── 6.1 Inventario ─────────────────────────────────────────────────────────
   getInventarioCrudo: () => apiFetch<InvCrudoRow[]>('/material/inventario/crudo'),
   getInventarioConcentrado: () => apiFetch<InvConcentradoRow[]>('/material/inventario/concentrado'),
-  getInventarioLote: (id: number) => apiFetch<LoteConcentradoDetalle>(`/material/inventario/lote/${id}`),
+  getInventarioLote: (id: number) => apiFetch<InventarioLoteResumen>(`/material/inventario/lote/${id}`),
   getInventarioResumen: () => apiFetch<InventarioResumen>('/material/inventario/resumen'),
 
   // ── 6.2 Procesamiento / lotes de concentrado ─────────────────────────────────
@@ -1309,15 +1458,21 @@ export const materialApi = {
   // Escrituras de concentrado
   createConcentrado: (body: ConcentradoCreatePayload) => apiPost<CreatedResponse>('/material/concentrado', body),
   procesarConcentrado: (id: number, body: ConcentradoProcesarPayload) =>
-    apiPost<CreatedResponse>(`/material/concentrado/${id}/procesar`, body),
+    apiPost<ConcentradoProcesarResult>(`/material/concentrado/${id}/procesar`, body),
   cerrarConcentrado: (id: number, body: ConcentradoCerrarPayload) =>
     apiPut<CreatedResponse>(`/material/concentrado/${id}/cerrar`, body),
   updateConcentrado: (id: number, body: ConcentradoUpdatePayload) =>
     apiPut<CreatedResponse>(`/material/concentrado/${id}`, body),
+  corregirConcentrado: (id: number, body: ConcentradoCorregirPayload) =>
+    apiPatch<CreatedResponse>(`/material/concentrado/${id}/concentrado`, body),
   deleteConcentradoMaterial: (id: number, idEntrada: number) =>
     apiDelete<CreatedResponse>(`/material/concentrado/${id}/material/${idEntrada}`),
   deleteConcentrado: (id: number) => apiDelete<CreatedResponse>(`/material/concentrado/${id}`),
   createAnalisisConcentrado: (body: AnalisisConcentradoPayload) => apiPost<CreatedResponse>('/material/analisis', body),
+  // Merma del lote (gramos de metal). GET lee, PATCH registra/actualiza (solo lo que cambie).
+  getConcentradoMerma: (id: number) => apiFetch<MermaConcentrado>(`/material/concentrado/${id}/merma`),
+  updateConcentradoMerma: (id: number, body: MermaPayload) =>
+    apiPatch<CreatedResponse>(`/material/concentrado/${id}/merma`, body),
 
   // ── 6.3 Viajes de material ───────────────────────────────────────────────────
   getViajesMaterial: (q?: ViajesMaterialQuery) =>
@@ -1332,12 +1487,31 @@ export const materialApi = {
   getViajesPorLote: (idLote: number) => apiFetch<ViajeLoteTrace[]>(`/material/viajes/lote/${idLote}`),
   getViajeTrazabilidad: (id: number) => apiFetch<ViajeTrazabilidad>(`/material/viajes/${id}/trazabilidad`),
   getLineaTrazabilidad: (idLinea: number) => apiFetch<LineaTrazabilidad>(`/material/viajes/linea/${idLinea}/trazabilidad`),
+  // Selector de Pago de mulas: viajes `almacenado` con líneas cargadas, listos para despachar.
+  getViajesDisponiblesMula: () => apiFetch<ViajeDisponibleMula[]>('/material/viajes/disponibles-mula'),
 
   // Escrituras de viajes
   createViaje: (body: ViajeCreatePayload) => apiPost<CreatedResponse>('/material/viajes', body),
+  updateViaje: (id: number, body: ViajeUpdatePayload) => apiPatch<CreatedResponse>(`/material/viajes/${id}`, body),
   addViajeLinea: (idViaje: number, body: ViajeLineaPayload) =>
     apiPost<CreatedResponse>(`/material/viajes/${idViaje}/lineas`, body),
+  updateViajeLinea: (idViaje: number, idLinea: number, body: ViajeLineaUpdatePayload) =>
+    apiPatch<CreatedResponse>(`/material/viajes/${idViaje}/lineas/${idLinea}`, body),
   deleteViajeLinea: (idViaje: number, idLinea: number) =>
     apiDelete<CreatedResponse>(`/material/viajes/${idViaje}/lineas/${idLinea}`),
   deleteViaje: (id: number) => apiDelete<CreatedResponse>(`/material/viajes/${id}`),
+
+  // ── 6.4 Tarifas de proceso (maquila) ─────────────────────────────────────────
+  // Vigente de cada código (por defecto hoy; acepta ?fecha=YYYY-MM-DD).
+  getTarifasProcesoVigentes: (fecha?: string) =>
+    apiFetch<TarifaProceso[]>(`/material/tarifas-proceso/vigentes${qs({ fecha })}`),
+  // Histórico completo (filtros opcionales codigo y activo 0/1).
+  getTarifasProceso: (q?: TarifasProcesoHistQuery) =>
+    apiFetch<TarifaProceso[]>(`/material/tarifas-proceso${qs({ codigo: q?.codigo, activo: q?.activo })}`),
+  // Actualizar precio: versiona (cierra la vigente y crea una nueva). Devuelve 201.
+  updatePrecioTarifaProceso: (body: TarifaProcesoUpdatePrecioPayload) =>
+    apiPost<TarifaProceso>('/material/tarifas-proceso', body),
+  // Corregir una fila (arreglar errores de digitación) sin crear versión nueva.
+  corregirTarifaProceso: (id: number, body: TarifaProcesoCorregirPayload) =>
+    apiPatch<TarifaProceso>(`/material/tarifas-proceso/${id}`, body),
 }

@@ -2,15 +2,25 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import type { Role, User } from '@/types'
 import { seedUsers } from '@/data/seed'
 import { authApi } from '@/api/auth'
+import { SESSION_KEY } from '@/auth/session'
 
 interface StoredUser extends User {
   password: string
+}
+
+interface Session {
+  user: User
+  token: string
+  /** true si la sesión proviene del login mock local (accesos rápidos / demo). */
+  mock?: boolean
 }
 
 interface AuthContextValue {
   user: User | null
   token: string | null
   users: User[]
+  /** true mientras se valida el token persistido contra el backend al arrancar. */
+  initializing: boolean
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>
   logout: () => void
   requestReset: (email: string) => { ok: boolean; token?: string; error?: string }
@@ -21,7 +31,6 @@ interface AuthContextValue {
 }
 
 const USERS_KEY = 'molinos_erp_users_v1'
-const SESSION_KEY = 'molinos_erp_session_v1'
 
 function loadUsers(): StoredUser[] {
   try {
@@ -52,12 +61,24 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [users, setUsers] = useState<StoredUser[]>(loadUsers)
-  const [session, setSession] = useState<{ user: User; token: string } | null>(() => {
+  const [session, setSession] = useState<Session | null>(() => {
     try {
       const raw = localStorage.getItem(SESSION_KEY)
       return raw ? JSON.parse(raw) : null
     } catch {
       return null
+    }
+  })
+  // Mientras validamos el token persistido contra el backend, no dejamos entrar
+  // a las rutas protegidas (evita mostrar el sistema con un token vencido/inválido).
+  const [initializing, setInitializing] = useState<boolean>(() => {
+    try {
+      const raw = localStorage.getItem(SESSION_KEY)
+      const s: Session | null = raw ? JSON.parse(raw) : null
+      // Solo hay que validar sesiones reales; las mock/demo no se verifican.
+      return Boolean(s && !s.mock)
+    } catch {
+      return false
     }
   })
   // tokens de restablecimiento activos (email -> código)
@@ -69,14 +90,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (session) {
+      // Solo se persiste la sesión; el token viaja dentro de ella. El cliente API
+      // (client.ts / withFallback.ts) lo lee vía getStoredToken().
       localStorage.setItem(SESSION_KEY, JSON.stringify(session))
-      // El cliente API (client.ts) lee el token desde localStorage['token'].
-      localStorage.setItem('token', session.token)
     } else {
       localStorage.removeItem(SESSION_KEY)
-      localStorage.removeItem('token')
     }
   }, [session])
+
+  // Al arrancar: si hay una sesión real persistida, validamos el token contra el
+  // backend (GET /auth/verify). Si no es válido (vencido, revocado o inexistente),
+  // cerramos la sesión para forzar el login. Las sesiones mock/demo se conservan.
+  useEffect(() => {
+    let cancelled = false
+    if (!session || session.mock) {
+      setInitializing(false)
+      return
+    }
+    authApi
+      .verify()
+      .then((ok) => {
+        if (cancelled) return
+        if (!ok) setSession(null)
+      })
+      .catch(() => {
+        if (!cancelled) setSession(null)
+      })
+      .finally(() => {
+        if (!cancelled) setInitializing(false)
+      })
+    return () => {
+      cancelled = true
+    }
+    // Solo debe ejecutarse una vez, al montar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const publicUsers = useMemo<User[]>(
     () => users.map(({ password: _pw, ...u }) => u),
@@ -103,7 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             activo: true,
             ultimoAcceso: new Date().toISOString().slice(0, 10),
           }
-          setSession({ user, token: resp.token })
+          setSession({ user, token: resp.token, mock: false })
           return { ok: true }
         }
       } catch {
@@ -118,7 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { password: _pw, ...publicUser } = found
       const withAccess: User = { ...publicUser, ultimoAcceso: new Date().toISOString().slice(0, 10) }
       setUsers((prev) => prev.map((u) => (u.id === found.id ? { ...u, ultimoAcceso: withAccess.ultimoAcceso } : u)))
-      setSession({ user: withAccess, token: fakeJwt(withAccess) })
+      setSession({ user: withAccess, token: fakeJwt(withAccess), mock: true })
       return { ok: true }
     },
     [users],
@@ -170,9 +218,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: session?.user ?? null,
       token: session?.token ?? null,
       users: publicUsers,
+      initializing,
       login, logout, requestReset, resetPassword, addUser, updateUser, removeUser,
     }),
-    [session, publicUsers, login, logout, requestReset, resetPassword, addUser, updateUser, removeUser],
+    [session, publicUsers, initializing, login, logout, requestReset, resetPassword, addUser, updateUser, removeUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -7,6 +7,7 @@ import { useCanWrite } from '@/hooks/usePermissions'
 import { apiError } from '@/api/client'
 import { formatCOP, formatDate, todayISO } from '@/utils/format'
 import { materialApi, num, type AguaReporteMensual, type AguaViaje } from '@/api/material'
+import { PagoAguaTab } from './PagoAguaApiPage'
 
 const cop = formatCOP
 
@@ -35,7 +36,7 @@ function loadAbonos(): AbonoAgua[] {
 }
 function saveAbonos(d: AbonoAgua[]) { try { localStorage.setItem(LS_ABONOS, JSON.stringify(d)) } catch { /* quota */ } }
 
-type PageTab = 'conductores' | 'registros'
+type PageTab = 'conductores' | 'registros' | 'pago-agua'
 
 interface FormReg { id_dueno: number | ''; fecha: string; valor_viaje: string; cantidad_viajes: string; acpm: string }
 const emptyReg = (): FormReg => ({ id_dueno: '', fecha: todayISO(), valor_viaje: '', cantidad_viajes: '1', acpm: '0' })
@@ -224,9 +225,13 @@ export function ViajesAguaApiPage() {
         <button role="tab" aria-selected={tab === 'registros'}
           className={`segment__btn ${tab === 'registros' ? 'segment__btn--active' : ''}`}
           onClick={() => setTab('registros')}>Todos los registros</button>
+        <button role="tab" aria-selected={tab === 'pago-agua'}
+          className={`segment__btn ${tab === 'pago-agua' ? 'segment__btn--active' : ''}`}
+          onClick={() => setTab('pago-agua')}>Pago de agua</button>
       </div>
 
-      {/* Navegador de mes + filtros (compartido por ambas pestañas: ambas son mensuales) */}
+      {/* Navegador de mes + filtros (compartido por "Por conductor" y "Todos los registros"; Pago de agua tiene su propio filtro de mes por dueño) */}
+      {tab !== 'pago-agua' && (
       <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1rem', padding: '0.75rem 1rem', background: '#fafaf9', border: '1px solid #e5e7eb', borderRadius: 'var(--radius-md)' }}>
         <span style={{ fontWeight: 700, fontSize: 'var(--fs-md)' }}>
           {periodoLabel(selMonth)}{selMonth === currentMonth && <span className="badge badge--warning" style={{ marginLeft: '0.5rem' }}>Mes actual</span>}
@@ -259,6 +264,10 @@ export function ViajesAguaApiPage() {
         )}
         <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={load} style={{ marginLeft: 'auto' }}>Refrescar</Button>
       </div>
+      )}
+
+      {/* ── Tab: Pago de agua (cuentas reales por dueño, abonos en cascada) ── */}
+      {tab === 'pago-agua' && <PagoAguaTab />}
 
       {/* ── Tab: Por conductor (mensual, estilo Mulas) ── */}
       {tab === 'conductores' && (
