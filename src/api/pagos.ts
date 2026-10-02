@@ -16,11 +16,14 @@ export interface CategoriaProveedor {
   descripcion?: string | null
 }
 
+export type TipoProveedor = 'general' | 'combustible' | 'transportadora' | 'laboratorio'
+
 export interface Proveedor {
   id: number
   nombre: string
   id_categoria?: number | null
   categoria?: string | null
+  tipo?: TipoProveedor
   contacto?: string | null
   telefono?: string | null
   ciudad?: string | null
@@ -32,6 +35,7 @@ export interface Proveedor {
 export interface ProveedorPayload {
   nombre: string
   id_categoria?: number
+  tipo?: TipoProveedor
   contacto?: string
   telefono?: string
   ciudad?: string
@@ -42,6 +46,7 @@ export interface ProveedorPayload {
 }
 export interface ProveedoresFiltro {
   id_categoria?: number
+  tipo?: TipoProveedor
   estado?: string
   q?: string
 }
@@ -76,12 +81,16 @@ export const pagosApi = {
 
   // Proveedores
   getProveedores: (filtro?: ProveedoresFiltro) =>
-    apiFetch<Proveedor[]>(`/pagos/proveedores${qs({ id_categoria: filtro?.id_categoria, estado: filtro?.estado, q: filtro?.q })}`),
+    apiFetch<Proveedor[]>(`/pagos/proveedores${qs({ id_categoria: filtro?.id_categoria, tipo: filtro?.tipo, estado: filtro?.estado, q: filtro?.q })}`),
   getProveedor: (id: number) => apiFetch<Proveedor>(`/pagos/proveedores/${id}`),
   createProveedor: (body: ProveedorPayload) => apiPost<Proveedor>('/pagos/proveedores', body),
   updateProveedor: (id: number, body: Partial<ProveedorPayload>) => apiPut<Proveedor>(`/pagos/proveedores/${id}`, body),
   deleteProveedor: (id: number) => apiDelete<{ message?: string }>(`/pagos/proveedores/${id}`),
   getCategoriasProveedor: () => apiFetch<CategoriaProveedor[]>('/pagos/proveedores/categorias'),
+  getCategoriaProveedor: (id: number) => apiFetch<CategoriaProveedor>(`/pagos/proveedores/categorias/${id}`),
+  createCategoriaProveedor: (nombre: string) => apiPost<CategoriaProveedor>('/pagos/proveedores/categorias', { nombre }),
+  updateCategoriaProveedor: (id: number, nombre: string) => apiPut<CategoriaProveedor>(`/pagos/proveedores/categorias/${id}`, { nombre }),
+  deleteCategoriaProveedor: (id: number) => apiDelete<{ message?: string }>(`/pagos/proveedores/categorias/${id}`),
 
   // Gastos
   getGastos: () => apiFetch<unknown[]>('/pagos/gastos'),
