@@ -12,6 +12,7 @@ import { formatCOP } from '@/utils/format'
 import { materialApi, num, type Volqueta, type TarifaZona, type EstadoEntrada, type EstadoPagoFlete, type EntradaRow } from '@/api/material'
 import { LlegadaModal } from './EntradasApiPage'
 import { PagoFleteTab } from './PagoFleteApiPage'
+import { MinasTab } from './CatalogosApiPage'
 
 const cop = formatCOP
 
@@ -517,11 +518,12 @@ function LlegadasTab({ canWrite }: { canWrite: boolean }) {
 // ════════════════════════════════════════════════════════════════════════════
 // PÁGINA
 // ════════════════════════════════════════════════════════════════════════════
-type Tab = 'llegadas' | 'volquetas' | 'duenos' | 'tarifas' | 'pago-flete'
+type Tab = 'llegadas' | 'volquetas' | 'duenos' | 'minas' | 'tarifas' | 'pago-flete'
 const TABS: { key: Tab; label: string }[] = [
   { key: 'llegadas', label: 'Llegadas' },
   { key: 'volquetas', label: 'Volquetas' },
   { key: 'duenos', label: 'Dueños' },
+  { key: 'minas', label: 'Minas' },
   { key: 'tarifas', label: 'Tarifas flete' },
   { key: 'pago-flete', label: 'Pago de flete' },
 ]
@@ -546,6 +548,7 @@ export function VolquetasApiPage() {
       {tab === 'llegadas' && <LlegadasTab canWrite={canWrite} />}
       {tab === 'volquetas' && <VolquetasTab canWrite={canWrite} />}
       {tab === 'duenos' && <DuenosTab canWrite={canWrite} />}
+      {tab === 'minas' && <MinasTab canWrite={canWrite} />}
       {tab === 'tarifas' && <TarifasFleteTab canWrite={canWrite} />}
       {tab === 'pago-flete' && <PagoFleteTab />}
     </div>

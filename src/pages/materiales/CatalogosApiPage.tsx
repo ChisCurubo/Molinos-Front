@@ -234,7 +234,7 @@ function MinerosTab({ canWrite }: { canWrite: boolean }) {
 // ════════════════════════════════════════════════════════════════════════════
 // MINAS
 // ════════════════════════════════════════════════════════════════════════════
-function MinasTab({ canWrite }: { canWrite: boolean }) {
+export function MinasTab({ canWrite }: { canWrite: boolean }) {
   const toast = useToast()
   const { data, loading, error, reload } = useMinas()
   const [modal, setModal] = useState<null | 'nuevo' | number>(null)

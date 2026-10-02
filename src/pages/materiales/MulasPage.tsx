@@ -595,7 +595,7 @@ export function MulasPage() {
         <div className="grid grid--form">
           <Input label="Nombre / razón social" required placeholder="TRANSPORTES VILLA"
             value={formMula.nombre} onChange={e => setFormMula(f => ({ ...f, nombre: e.target.value }))} />
-          <Input label="Placa" required placeholder="STO-456" style={{ fontFamily: 'var(--font-mono)' }}
+          <Input label="Placa" required placeholder="STO-456" mono
             value={formMula.placa} onChange={e => setFormMula(f => ({ ...f, placa: e.target.value }))} />
           <Input label="Conductor (opcional)" placeholder="Nombre del conductor"
             value={formMula.conductor} onChange={e => setFormMula(f => ({ ...f, conductor: e.target.value }))} />

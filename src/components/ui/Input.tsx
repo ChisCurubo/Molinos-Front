@@ -20,6 +20,7 @@ export function Input({
   required,
   id,
   className = '',
+  style,
   ...rest
 }: InputProps) {
   const autoId = useId()
@@ -28,7 +29,7 @@ export function Input({
   const errorId = `${inputId}-error`
 
   return (
-    <div className={`field ${icon ? 'field--with-icon' : ''} ${error ? 'field--error' : ''}`}>
+    <div className={`field ${icon ? 'field--with-icon' : ''} ${error ? 'field--error' : ''}`} style={style}>
       <label className="field__label" htmlFor={inputId}>
         {label}
         {required && <span className="field__req" aria-hidden="true">*</span>}

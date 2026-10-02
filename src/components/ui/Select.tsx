@@ -26,6 +26,7 @@ export function Select({
   required,
   id,
   className = '',
+  style,
   ...rest
 }: SelectProps) {
   const autoId = useId()
@@ -34,7 +35,7 @@ export function Select({
   const errorId = `${selectId}-error`
 
   return (
-    <div className={`field ${icon ? 'field--with-icon' : ''} ${error ? 'field--error' : ''}`}>
+    <div className={`field ${icon ? 'field--with-icon' : ''} ${error ? 'field--error' : ''}`} style={style}>
       <label className="field__label" htmlFor={selectId}>
         {label}
         {required && <span className="field__req" aria-hidden="true">*</span>}

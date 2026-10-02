@@ -253,12 +253,19 @@ export function PagoMulasApiPage() {
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
 
   // ── Abonos por proveedor (para la sub-lista "Abonos registrados" del período) ──
-  const [abonosCache, setAbonosCache] = useState<Map<number, AbonoMula[]>>(new Map())
+  // El backend limita el historial a 50 registros por página, así que cada proveedor
+  // trae su propio paginador (raro que se necesite, pero un proveedor muy activo en
+  // un mes podría superar 50 abonos).
+  interface AbonosPagina { abonos: AbonoMula[]; page: number; totalPages: number; total: number }
+  const [abonosCache, setAbonosCache] = useState<Map<number, AbonosPagina>>(new Map())
   const [loadingAbonos, setLoadingAbonos] = useState<Set<number>>(new Set())
-  const loadAbonosProveedor = useCallback((idProveedor: number) => {
+  const loadAbonosProveedor = useCallback((idProveedor: number, page = 1) => {
     setLoadingAbonos(p => new Set(p).add(idProveedor))
-    pagosMulasApi.getHistorial({ id_proveedor: idProveedor, desde: mesStart, hasta: mesEnd, limit: 100 })
-      .then(r => setAbonosCache(p => new Map(p).set(idProveedor, r.abonos ?? [])))
+    pagosMulasApi.getHistorial({ id_proveedor: idProveedor, desde: mesStart, hasta: mesEnd, page, limit: 50 })
+      .then(r => setAbonosCache(p => new Map(p).set(idProveedor, {
+        abonos: r.abonos ?? [], page: r.pagination?.page ?? 1,
+        totalPages: r.pagination?.total_pages ?? 1, total: r.pagination?.total ?? (r.abonos?.length ?? 0),
+      })))
       .catch(e => toast.error(apiError(e).message))
       .finally(() => setLoadingAbonos(p => { const n = new Set(p); n.delete(idProveedor); return n }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -589,24 +596,43 @@ export function PagoMulasApiPage() {
                       </div>
                       {loadingAbonos.has(g.id_proveedor) ? (
                         <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>Cargando…</p>
-                      ) : (abonosCache.get(g.id_proveedor)?.length ?? 0) === 0 ? (
+                      ) : (abonosCache.get(g.id_proveedor)?.abonos.length ?? 0) === 0 ? (
                         <em style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-sm)' }}>Sin abonos registrados este mes.</em>
                       ) : (
-                        <div className="table-wrap">
-                          <table className="data-table" style={{ fontSize: 'var(--fs-xs)' }}>
-                            <thead><tr><th>Fecha</th><th>Método</th><th style={{ textAlign: 'right' }}>Valor</th><th>Comprobante</th></tr></thead>
-                            <tbody>
-                              {abonosCache.get(g.id_proveedor)!.map(a => (
-                                <tr key={a.id}>
-                                  <td style={{ whiteSpace: 'nowrap' }}>{formatDate(a.fecha_abono)}</td>
-                                  <td>{METODO_LABEL(a.metodo_pago)}</td>
-                                  <td style={{ textAlign: 'right', fontWeight: 700, color: '#15803d' }} className="mono">{cop(num(a.valor))}</td>
-                                  <td><ComprobanteLink url={a.comprobante_url} /></td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
+                        <>
+                          <div className="table-wrap">
+                            <table className="data-table" style={{ fontSize: 'var(--fs-xs)' }}>
+                              <thead><tr><th>Fecha</th><th>Método</th><th style={{ textAlign: 'right' }}>Valor</th><th>Comprobante</th></tr></thead>
+                              <tbody>
+                                {abonosCache.get(g.id_proveedor)!.abonos.map(a => (
+                                  <tr key={a.id}>
+                                    <td style={{ whiteSpace: 'nowrap' }}>{formatDate(a.fecha_abono)}</td>
+                                    <td>{METODO_LABEL(a.metodo_pago)}</td>
+                                    <td style={{ textAlign: 'right', fontWeight: 700, color: '#15803d' }} className="mono">{cop(num(a.valor))}</td>
+                                    <td><ComprobanteLink url={a.comprobante_url} /></td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          {abonosCache.get(g.id_proveedor)!.totalPages > 1 && (
+                            <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', alignItems: 'center', marginTop: '0.5rem' }}>
+                              <Button size="sm" variant="secondary"
+                                disabled={abonosCache.get(g.id_proveedor)!.page <= 1}
+                                onClick={() => loadAbonosProveedor(g.id_proveedor, abonosCache.get(g.id_proveedor)!.page - 1)}>
+                                Anterior
+                              </Button>
+                              <span style={{ fontSize: 'var(--fs-xs)' }}>
+                                Página {abonosCache.get(g.id_proveedor)!.page} de {abonosCache.get(g.id_proveedor)!.totalPages}
+                              </span>
+                              <Button size="sm" variant="secondary"
+                                disabled={abonosCache.get(g.id_proveedor)!.page >= abonosCache.get(g.id_proveedor)!.totalPages}
+                                onClick={() => loadAbonosProveedor(g.id_proveedor, abonosCache.get(g.id_proveedor)!.page + 1)}>
+                                Siguiente
+                              </Button>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
