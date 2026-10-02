@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
-  ArrowDownCircle, BarChart3, Banknote, Boxes, CalendarDays, ClipboardList, Cloud, Coins, Container, Droplets, Factory,
-  FlaskConical, HandCoins, Home, Landmark, Layers, Mountain, Package, PackagePlus, Send,
+  ArrowDownCircle, BarChart3, Banknote, Boxes, CalendarDays, CircleDollarSign, ClipboardList, Cloud, Coins, Container, Droplets, Factory,
+  FlaskConical, Fuel, HandCoins, Home, Landmark, Layers, Mountain, Package, PackagePlus, Send,
   Truck, UserCog, Users2, Wallet, type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
@@ -64,6 +64,21 @@ const GROUPS: NavGroup[] = [
       { to: '/finanzas/cobrar',   label: 'Cuentas por cobrar',   icon: ArrowDownCircle  },
       { to: '/finanzas/prestamos', label: 'Préstamos financieros', icon: Landmark        },
       { to: '/finanzas/informes', label: 'Informes de finanzas',  icon: BarChart3        },
+    ],
+  },
+  {
+    module: 'finanzas',
+    label: 'Pagos y finanzas · API',
+    icon: Cloud,
+    items: [
+      { to: '/finanzas/cxp-api',         label: 'Cuentas por pagar',   icon: Wallet          },
+      { to: '/finanzas/cxc-api',         label: 'Cuentas por cobrar',  icon: ArrowDownCircle },
+      { to: '/finanzas/combustible-api', label: 'Combustible',        icon: Fuel            },
+      { to: '/finanzas/anticipos-api',   label: 'Adelantos a terceros', icon: CircleDollarSign },
+      { to: '/finanzas/proveedores-api', label: 'Proveedores',        icon: Users2          },
+      { to: '/finanzas/nominas-api',     label: 'Empleados y nómina', icon: UserCog         },
+      { to: '/finanzas/calendario-turnos-api', label: 'Calendario de turnos', icon: CalendarDays },
+      { to: '/finanzas/prestamos-api',   label: 'Préstamos financieros', icon: Landmark      },
     ],
   },
   {
