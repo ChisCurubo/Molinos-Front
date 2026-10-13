@@ -13,6 +13,7 @@ import { formatCOP, todayISO } from '@/utils/format'
 import {
   nominaApi,
   type Empleado, type EmpleadoPayload, type SalarioEmpleado, type TipoPago, type PrestamoEmpleado,
+  type PrestacionesEmpleado,
 } from '@/api/nomina'
 
 const cop = formatCOP
@@ -27,6 +28,29 @@ export function fmtDMY(iso: string | null | undefined) {
 }
 
 export const nombreCompleto = (e: Empleado) => e.apellido ? `${e.nombre} ${e.apellido}` : e.nombre
+
+// ─── Avatar con iniciales ────────────────────────────────────────────────────
+// El backend todavía no tiene foto de empleado (sin columna ni endpoint de
+// subida) — mientras tanto se usa un avatar con iniciales y color estable
+// por id, listo para reemplazarse por una <img> apenas exista foto_url.
+const AVATAR_COLORS = ['#2563eb', '#059669', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#c026d3', '#65a30d']
+export function avatarColor(id: number) { return AVATAR_COLORS[id % AVATAR_COLORS.length] }
+export function avatarInitials(e: Empleado) {
+  const a = (e.nombre ?? '').trim().charAt(0)
+  const b = (e.apellido ?? '').trim().charAt(0)
+  return (a + b).toUpperCase() || '?'
+}
+export function Avatar({ empleado, size = 40 }: { empleado: Empleado; size?: number }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '999px', background: avatarColor(empleado.id),
+      color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontWeight: 700, fontSize: size * 0.4, flexShrink: 0, userSelect: 'none',
+    }}>
+      {avatarInitials(empleado)}
+    </div>
+  )
+}
 
 export const TIPO_PAGO_OPTS: { value: TipoPago; label: string }[] = [
   { value: 'FIJO_MENSUAL', label: 'Fijo mensual' },
@@ -67,6 +91,30 @@ export function useEmpleados() {
 }
 export type EmpleadosState = ReturnType<typeof useEmpleados>
 
+// ─── Salario actual de TODOS los empleados (para la columna "Salario" de la
+// tabla de Empleados) — no existe un endpoint en lote, así que se trae uno
+// por uno en paralelo, igual que ya hace CalendarioTurnosApiPage para filtrar
+// por tipo de turno. `null` = sin configurar (404 esperado, no es error).
+export function useSalariosEmpleados(empleados: EmpleadosState) {
+  const [data, setData] = useState<Record<number, SalarioEmpleado | null>>({})
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    if (empleados.loading) return
+    if (empleados.data.length === 0) { setData({}); setLoading(false); return }
+    let cancelado = false
+    setLoading(true)
+    Promise.all(empleados.data.map(e =>
+      nominaApi.getSalarioActual(e.id).then(s => [e.id, s] as const).catch(() => [e.id, null] as const)
+    )).then(entries => {
+      if (cancelado) return
+      setData(Object.fromEntries(entries))
+      setLoading(false)
+    })
+    return () => { cancelado = true }
+  }, [empleados.loading, empleados.data])
+  return { data, loading }
+}
+
 export function EmpleadoSelect({ empleados, value, onChange, placeholder = '— Seleccionar empleado —', required }: {
   empleados: Empleado[]; value: number | ''; onChange: (id: number | '') => void; placeholder?: string; required?: boolean
 }) {
@@ -81,15 +129,35 @@ export function EmpleadoSelect({ empleados, value, onChange, placeholder = '— 
   )
 }
 
+// ─── Celda de salario — monto + unidad bien resaltados, tipo de pago como
+// detalle chico debajo, para que la tabla de Empleados sea informativa de un
+// vistazo sin tener que entrar al perfil ────────────────────────────────────
+export function SalarioCell({ salario, loading }: { salario: SalarioEmpleado | null | undefined; loading: boolean }) {
+  if (loading) return <span style={{ color: 'var(--text-faint)' }}>…</span>
+  if (!salario) return <em style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-sm)' }}>Sin configurar</em>
+  return (
+    <div>
+      <div className="mono" style={{ fontWeight: 700 }}>
+        {cop(num(salario.tarifa_monto))}
+        <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 'var(--fs-xs)' }}>{TIPO_PAGO_SUFFIX[salario.tipo_pago]}</span>
+      </div>
+      <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+        {TIPO_PAGO_LABEL(salario.tipo_pago)}{!!num(salario.aplica_aux_transp) && ' · Aux. transporte'}
+      </div>
+    </div>
+  )
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // EMPLEADOS
 // ════════════════════════════════════════════════════════════════════════════
 const emptyEmpleadoForm = () => ({ nombre: '', apellido: '', cc: '', cuenta: '', nequi: false, labor: '' })
 
-export function EmpleadosTab({ canWrite, empleados, onVerFicha }: {
-  canWrite: boolean; empleados: EmpleadosState; onVerFicha?: (e: Empleado) => void
+export function EmpleadosTab({ canWrite, empleados, onVerPerfil }: {
+  canWrite: boolean; empleados: EmpleadosState; onVerPerfil?: (id: number) => void
 }) {
   const toast = useToast()
+  const salarios = useSalariosEmpleados(empleados)
   const [q, setQ] = useState('')
   const filtrados = useMemo(() => {
     if (!q.trim()) return empleados.data
@@ -149,21 +217,32 @@ export function EmpleadosTab({ canWrite, empleados, onVerFicha }: {
       <Card title={`Empleados (${filtrados.length})`}>
         <div className="table-wrap">
           <table className="data-table">
-            <thead><tr><th>Nombre</th><th>Cédula</th><th>Cuenta / Nequi</th><th>Labor</th><th></th></tr></thead>
+            <thead><tr><th>Nombre</th><th>Cédula</th><th>Cuenta / Nequi</th><th>Labor</th><th>Salario</th><th></th></tr></thead>
             <tbody>
-              <TableState loading={empleados.loading} error={empleados.error} empty={filtrados.length === 0} cols={5} onRetry={empleados.reload} />
+              <TableState loading={empleados.loading} error={empleados.error} empty={filtrados.length === 0} cols={6} onRetry={empleados.reload} />
               {!empleados.loading && !empleados.error && filtrados.map(e => (
                 <tr key={e.id}>
-                  <td style={{ fontWeight: 700 }}>{nombreCompleto(e)}</td>
+                  <td style={{ fontWeight: 700 }}>
+                    {onVerPerfil ? (
+                      <button
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', textAlign: 'left' }}
+                        onClick={() => onVerPerfil(e.id)}
+                      >
+                        <Avatar empleado={e} size={28} />
+                        {nombreCompleto(e)}
+                      </button>
+                    ) : nombreCompleto(e)}
+                  </td>
                   <td className="mono">{e.cc}</td>
                   <td>
                     <div className="mono" style={{ fontSize: 'var(--fs-sm)' }}>{e.cuenta ?? '—'}</div>
                     {!!num(e.nequi) && <span className="badge badge--info" style={{ fontSize: '0.65rem' }}>Nequi</span>}
                   </td>
                   <td>{e.labor ?? <em style={{ color: 'var(--text-faint)' }}>—</em>}</td>
+                  <td><SalarioCell salario={salarios.data[e.id]} loading={salarios.loading} /></td>
                   <td>
                     <div className="row" style={{ gap: 4 }}>
-                      {onVerFicha && <Button variant="secondary" size="sm" onClick={() => onVerFicha(e)}>Ficha</Button>}
+                      {onVerPerfil && <Button variant="secondary" size="sm" onClick={() => onVerPerfil(e.id)}>Perfil</Button>}
                       {canWrite && <Button variant="secondary" size="sm" icon={<Pencil size={14} />} onClick={() => openEdit(e)} />}
                       {canWrite && <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => setDelEmpleado(e)} />}
                     </div>
@@ -199,9 +278,12 @@ export function EmpleadosTab({ canWrite, empleados, onVerFicha }: {
 // ════════════════════════════════════════════════════════════════════════════
 // SALARIOS (vigencias versionadas — igual patrón que Tarifas de maquila)
 // ════════════════════════════════════════════════════════════════════════════
-export function SalariosTab({ canWrite, empleados }: { canWrite: boolean; empleados: EmpleadosState }) {
+export function SalariosTab({ canWrite, empleados, idEmpleadoInicial, fixed }: {
+  canWrite: boolean; empleados: EmpleadosState; idEmpleadoInicial?: number; fixed?: boolean
+}) {
   const toast = useToast()
-  const [idEmpleado, setIdEmpleado] = useState<number | ''>('')
+  const [idEmpleado, setIdEmpleado] = useState<number | ''>(idEmpleadoInicial ?? '')
+  useEffect(() => { if (idEmpleadoInicial != null) setIdEmpleado(idEmpleadoInicial) }, [idEmpleadoInicial])
 
   const [actual, setActual] = useState<SalarioEmpleado | null>(null)
   const [loadingActual, setLoadingActual] = useState(false)
@@ -235,6 +317,21 @@ export function SalariosTab({ canWrite, empleados }: { canWrite: boolean; emplea
   }, [idEmpleado])
   const toggleHist = () => { const next = !histOpen; setHistOpen(next); if (next) loadHist() }
   useEffect(() => { setHistOpen(false); setHist([]) }, [idEmpleado])
+
+  // ── Prestaciones sociales estimadas (cesantías, prima, vacaciones…) — el
+  // backend solo provisiona esto, NO salud/pensión (no hay esos campos). ──
+  const [anioPrest, setAnioPrest] = useState(String(new Date().getFullYear()))
+  const [prest, setPrest] = useState<PrestacionesEmpleado | null>(null)
+  const [loadingPrest, setLoadingPrest] = useState(false)
+  const loadPrest = useCallback(() => {
+    if (idEmpleado === '') { setPrest(null); return }
+    setLoadingPrest(true)
+    nominaApi.getPrestaciones(idEmpleado, Number(anioPrest) || undefined)
+      .then(p => setPrest(p))
+      .catch(() => setPrest(null))
+      .finally(() => setLoadingPrest(false))
+  }, [idEmpleado, anioPrest])
+  useEffect(() => { loadPrest() }, [loadPrest])
 
   // ── Nueva vigencia (POST → cierra la anterior sola) ──
   const [nuevaModal, setNuevaModal] = useState(false)
@@ -300,13 +397,15 @@ export function SalariosTab({ canWrite, empleados }: { canWrite: boolean; emplea
 
   return (
     <>
-      <div style={{ marginBottom: '1rem' }}>
-        <Card>
-          <div className="grid grid--form" style={{ marginBottom: 0 }}>
-            <EmpleadoSelect empleados={empleados.data} value={idEmpleado} onChange={setIdEmpleado} placeholder="— Selecciona un empleado —" />
-          </div>
-        </Card>
-      </div>
+      {!fixed && (
+        <div style={{ marginBottom: '1rem' }}>
+          <Card>
+            <div className="grid grid--form" style={{ marginBottom: 0 }}>
+              <EmpleadoSelect empleados={empleados.data} value={idEmpleado} onChange={setIdEmpleado} placeholder="— Selecciona un empleado —" />
+            </div>
+          </Card>
+        </div>
+      )}
 
       {idEmpleado === '' ? (
         <Card><p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 0' }}>Selecciona un empleado para ver y gestionar su salario.</p></Card>
@@ -371,6 +470,37 @@ export function SalariosTab({ canWrite, empleados }: { canWrite: boolean; emplea
               )}
             </Card>
           </div>
+
+          <div style={{ marginTop: '1rem' }}>
+            <Card title="Prestaciones sociales"
+              actions={<Input label="Año" type="number" value={anioPrest} onChange={e => setAnioPrest(e.target.value)} style={{ maxWidth: '7rem' }} />}>
+              {loadingPrest ? (
+                <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem 0' }}>Cargando…</p>
+              ) : !prest ? (
+                <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem 0' }}>Sin datos de prestaciones para {anioPrest}.</p>
+              ) : (
+                <>
+                  <div className="grid grid--kpi">
+                    <KpiTile label="Cesantías" value={cop(num(prest.cesantias))} accent="brown" />
+                    <KpiTile label="Intereses de cesantías" value={cop(num(prest.intereses_cesantias))} accent="amber" />
+                    <KpiTile label="Prima de servicios" value={cop(num(prest.prima))} accent="emerald" />
+                    <KpiTile label="Vacaciones" value={cop(num(prest.vacaciones))} accent="green" />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '0.9rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
+                      Provisionado sobre {num(prest.meses_trabajados)} mes(es) trabajados · base mensual {cop(num(prest.base_mensual))}
+                    </span>
+                    <span style={{ fontWeight: 800, fontSize: 'var(--fs-lg)' }} className="mono">Total: {cop(num(prest.total_provisionado))}</span>
+                  </div>
+                </>
+              )}
+              <div className="callout" style={{ marginTop: '0.9rem' }}>
+                Esto son las <strong>prestaciones sociales</strong> que provisiona el backend (cesantías, sus intereses,
+                prima de servicios y vacaciones). <strong>Salud y pensión (seguridad social) todavía no se calculan</strong> —
+                el backend no tiene esos campos; si se necesitan, hay que pedirlos en el backend.
+              </div>
+            </Card>
+          </div>
         </>
       )}
 
@@ -418,8 +548,8 @@ export function SalariosTab({ canWrite, empleados }: { canWrite: boolean; emplea
 // ════════════════════════════════════════════════════════════════════════════
 const emptyPrestamoForm = () => ({ id_empleado: '' as number | '', valor: '', concepto: '', fecha: todayISO() })
 
-export function PrestamosTab({ canWrite, empleados, idEmpleadoInicial }: {
-  canWrite: boolean; empleados: EmpleadosState; idEmpleadoInicial?: number
+export function PrestamosTab({ canWrite, empleados, idEmpleadoInicial, fixed, onVerPerfil }: {
+  canWrite: boolean; empleados: EmpleadosState; idEmpleadoInicial?: number; fixed?: boolean; onVerPerfil?: (id: number) => void
 }) {
   const toast = useToast()
   const [idEmpleado, setIdEmpleado] = useState<number | ''>(idEmpleadoInicial ?? '')
@@ -491,9 +621,11 @@ export function PrestamosTab({ canWrite, empleados, idEmpleadoInicial }: {
   return (
     <>
       <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: '1rem' }}>
-        <div style={{ minWidth: '16rem' }}>
-          <EmpleadoSelect empleados={empleados.data} value={idEmpleado} onChange={setIdEmpleado} placeholder="— Todos los empleados —" />
-        </div>
+        {!fixed && (
+          <div style={{ minWidth: '16rem' }}>
+            <EmpleadoSelect empleados={empleados.data} value={idEmpleado} onChange={setIdEmpleado} placeholder="— Todos los empleados —" />
+          </div>
+        )}
         {canWrite && <Button size="sm" icon={<Plus size={16} />} onClick={openNuevo} style={{ marginLeft: 'auto' }}>Nuevo préstamo</Button>}
       </div>
 
@@ -505,13 +637,21 @@ export function PrestamosTab({ canWrite, empleados, idEmpleadoInicial }: {
       <Card title={`Préstamos de empleado (${data.length})`}>
         <div className="table-wrap">
           <table className="data-table">
-            <thead><tr><th>Fecha</th><th>Empleado</th><th>Concepto</th><th style={{ textAlign: 'right' }}>Valor</th><th style={{ textAlign: 'right' }}>Cuotas</th>{canWrite && <th></th>}</tr></thead>
+            <thead><tr><th>Fecha</th>{!fixed && <th>Empleado</th>}<th>Concepto</th><th style={{ textAlign: 'right' }}>Valor</th><th style={{ textAlign: 'right' }}>Cuotas</th>{canWrite && <th></th>}</tr></thead>
             <tbody>
               <TableState loading={loading} error={error} empty={data.length === 0} cols={canWrite ? 6 : 5} onRetry={load} />
               {!loading && !error && data.map(p => (
                 <tr key={p.id}>
                   <td>{fmtDMY(p.fecha)}</td>
-                  <td style={{ fontWeight: 600 }}>{nombreEmpleado(p.id_empleado)}</td>
+                  {!fixed && (
+                    <td style={{ fontWeight: 600 }}>
+                      {onVerPerfil ? (
+                        <button style={{ cursor: 'pointer', background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit' }} onClick={() => onVerPerfil(p.id_empleado)}>
+                          {nombreEmpleado(p.id_empleado)}
+                        </button>
+                      ) : nombreEmpleado(p.id_empleado)}
+                    </td>
+                  )}
                   <td>{p.concepto ?? <em style={{ color: 'var(--text-faint)' }}>—</em>}</td>
                   <td style={{ textAlign: 'right' }} className="mono">{cop(num(p.valor))}</td>
                   <td style={{ textAlign: 'right' }} className="mono">{p.cuotas}</td>
@@ -522,7 +662,7 @@ export function PrestamosTab({ canWrite, empleados, idEmpleadoInicial }: {
             {data.length > 0 && (
               <tfoot>
                 <tr style={{ fontWeight: 700 }}>
-                  <td colSpan={3}>Total ({data.length})</td>
+                  <td colSpan={fixed ? 2 : 3}>Total ({data.length})</td>
                   <td style={{ textAlign: 'right' }} className="mono">{cop(totalValor)}</td>
                   <td colSpan={canWrite ? 2 : 1} />
                 </tr>
@@ -535,7 +675,7 @@ export function PrestamosTab({ canWrite, empleados, idEmpleadoInicial }: {
       <Modal open={modal !== null} title={modal === 'nuevo' ? 'Nuevo préstamo' : 'Editar préstamo'} onClose={() => setModal(null)}
         footer={<><Button variant="secondary" onClick={() => setModal(null)}>Cancelar</Button><Button onClick={save} disabled={saving || !(Number(form.valor) > 0)}>Guardar</Button></>}>
         <div className="grid grid--form">
-          {modal === 'nuevo' ? (
+          {modal === 'nuevo' && !fixed ? (
             <EmpleadoSelect empleados={empleados.data} value={form.id_empleado} onChange={v => setForm(s => ({ ...s, id_empleado: v }))} required />
           ) : (
             <Input label="Empleado" value={typeof form.id_empleado === 'number' ? nombreEmpleado(form.id_empleado) : ''} disabled />

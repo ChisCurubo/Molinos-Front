@@ -102,18 +102,67 @@ export interface SaldoPrestamoEmpleado {
 // NÓMINA QUINCENAL (liquidaciones) — POST confirma: genera CxP de nómina y
 // descuenta la cuota de préstamo activo del empleado, si tiene uno.
 // ════════════════════════════════════════════════════════════════════════════
+// Shape verificado en vivo contra el backend real (curl directo, 2026-10-12):
+// NO trae "salario_base"/"bonificaciones"/"descuento_prestamo"/"neto" — esos
+// nombres eran una suposición que nunca coincidió con la respuesta real, por
+// eso la tabla de previsualización mostraba todo en $0 pese a que el backend
+// sí calculaba bien. `unidades` es horas/días trabajados (null en FIJO_MENSUAL).
+//
+// aporte_salud/aporte_pension/total_aportes_seguridad_social agregados por el
+// backend el 2026-10-12 (4%+4% sobre monto_bruto+total_bonos_periodo, ya
+// restado de monto_neto) — verificado en vivo: Eder (bruto 72.000) →
+// aporte_salud 2.880, aporte_pension 2.880, neto 66.240; Juan David (bruto+
+// bono 2.000.000) → aportes 160.000, neto 1.840.000. La migración que agrega
+// estas columnas a Nomina_Liquidaciones AÚN NO se corrió contra la BD real —
+// el preview (GET, no persiste) ya funciona, pero confirmar (POST, si
+// persiste) puede fallar hasta que se aplique.
+// Un renglón por cada turno de la quincena — ya trae todo sumado (propio +
+// nocturno + festivo), el front solo muestra el número. Verificado en vivo
+// (curl, 2026-10-13) contra /preview y /preview-grupal reales.
+export interface DetalleTurnoLiquidacion {
+  fecha: string
+  id_tipo_turno?: number
+  nombre_turno: string
+  horas_trabajadas?: string | number
+  es_domingo?: boolean
+  es_festivo?: boolean
+  horas_diurnas: string | number
+  horas_nocturnas: string | number
+  recargo_pct_diurno: string | number
+  recargo_pct_nocturno: string | number
+  monto: string | number
+}
 export interface LiquidacionPreview {
   id_empleado: number
   empleado?: string | null
   anio: number
   mes: number
   quincena: 1 | 2
-  salario_base?: string | number
-  bonificaciones?: string | number
-  descuento_prestamo?: string | number
-  neto?: string | number
+  tipo_pago?: TipoPago
+  unidades?: number | string | null
+  tarifa_aplicada?: string | number
+  monto_bruto?: string | number
+  total_bonos_periodo?: string | number
+  total_descuento_prestamo?: string | number
+  prestamos_a_descontar?: unknown[]
+  // Informativo: ya viene incluido dentro de monto_bruto, NO se resta aparte.
+  total_recargo_dominical_festivo?: string | number
+  // Desglose turno por turno — vacío para FIJO_MENSUAL (no usa Turnos).
+  detalle_turnos?: DetalleTurnoLiquidacion[]
+  aporte_salud?: string | number
+  aporte_pension?: string | number
+  total_aportes_seguridad_social?: string | number
+  otros_descuentos?: string | number
+  monto_neto?: string | number
+  ya_liquidada?: boolean
   [key: string]: unknown
 }
+// Shape de la liquidación ya confirmada no verificado contra una real (no hay
+// ninguna confirmada todavía en el ambiente de prueba) — se lee con fallback
+// a los nombres del preview (`monto_neto`) por si el backend es consistente,
+// sin descartar el nombre viejo `neto` por si no lo es. aporte_salud/
+// aporte_pension/total_aportes_seguridad_social quedan persistidos según el
+// backend, pero sin confirmar aún contra un registro real.
 export interface Liquidacion {
   id: number
   id_empleado: number
@@ -122,6 +171,11 @@ export interface Liquidacion {
   mes: number
   quincena: 1 | 2
   neto?: string | number
+  monto_neto?: string | number
+  total_recargo_dominical_festivo?: string | number
+  aporte_salud?: string | number
+  aporte_pension?: string | number
+  total_aportes_seguridad_social?: string | number
   fecha?: string
   [key: string]: unknown
 }
@@ -207,6 +261,7 @@ export interface Turno {
   planta?: string | null
   horas_trabajadas: string | number
   presente: boolean | number
+  es_festivo?: boolean | number
   comentarios?: string | null
   quincena?: number
   created_at?: string
@@ -219,6 +274,7 @@ export interface TurnoUpsertPayload {
   horas_trabajadas?: number
   presente?: boolean
   id_planta_proceso?: number
+  es_festivo?: boolean
   comentarios?: string
 }
 export type TurnoUpdatePayload = Partial<TurnoUpsertPayload>
@@ -241,6 +297,22 @@ export interface TipoTurnoPayload {
   hora_inicio: string
   hora_fin: string
   recargo_porcentaje: number
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// JORNADA NOCTURNA LEGAL — histórico del corte legal (Ley 2101 de 2021, se ha
+// movido 3 veces desde 2021). Solo se crea (nunca se edita/borra una fila
+// vieja): si el corte cambia, se agrega una fila nueva con vigente_desde.
+// ════════════════════════════════════════════════════════════════════════════
+export interface JornadaNocturnaLegal {
+  id: number
+  hora_inicio_nocturno: string
+  vigente_desde: string
+  created_at?: string
+}
+export interface JornadaNocturnaLegalPayload {
+  hora_inicio_nocturno: string
+  vigente_desde: string
 }
 
 export const nominaApi = {
@@ -324,4 +396,9 @@ export const nominaApi = {
   createTipoTurno: (body: TipoTurnoPayload) => apiPost<TipoTurno>('/nomina/turnos/tipos', body),
   updateTipoTurno: (id: number, body: Partial<TipoTurnoPayload>) => apiPut<TipoTurno>(`/nomina/turnos/tipos/${id}`, body),
   deleteTipoTurno: (id: number) => apiDelete<{ message?: string }>(`/nomina/turnos/tipos/${id}`),
+
+  // ── Jornada nocturna legal (histórico del corte, uso raro) ─────────────────
+  getJornadaNocturnaLegal: () => apiFetch<JornadaNocturnaLegal[]>('/nomina/jornada-nocturna-legal'),
+  createJornadaNocturnaLegal: (body: JornadaNocturnaLegalPayload) =>
+    apiPost<JornadaNocturnaLegal>('/nomina/jornada-nocturna-legal', body),
 }

@@ -3,7 +3,7 @@ import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
 import { useCanWrite } from '@/hooks/usePermissions'
 import { nominaApi } from '@/api/nomina'
 import { useEmpleados, type EmpleadosState } from '@/pages/nomina/empleadosShared'
-import { CalendarioTab, usePlantas } from './EmpleadosNominaApiPage'
+import { CalendarioTab, usePlantas, EmpleadoProfileModal } from './EmpleadosNominaApiPage'
 
 // Solo entra al calendario el personal que se paga por día u hora (turnos
 // variables). El personal administrativo (TipoPago FIJO_MENSUAL) no asigna
@@ -40,6 +40,7 @@ export function CalendarioTurnosApiPage() {
   const canWrite = useCanWrite('finanzas')
   const empleados = useEmpleadosConTurno()
   const plantas = usePlantas()
+  const [perfilId, setPerfilId] = useState<number | null>(null)
 
   return (
     <div className="page">
@@ -48,7 +49,8 @@ export function CalendarioTurnosApiPage() {
         subtitle="Solo personal con pago por día u hora. El personal administrativo tiene sueldo fijo y se gestiona desde la pestaña Turnos de Empleados y nómina."
       />
       {!canWrite && <ReadOnlyBanner />}
-      <CalendarioTab canWrite={canWrite} empleados={empleados} plantas={plantas} />
+      <CalendarioTab canWrite={canWrite} empleados={empleados} plantas={plantas} onVerPerfil={setPerfilId} />
+      <EmpleadoProfileModal idEmpleado={perfilId} empleados={empleados} canWrite={canWrite} onClose={() => setPerfilId(null)} />
     </div>
   )
 }
