@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Calculator, ChevronDown, ChevronUp, FileText, ImageIcon, Landmark, Pencil, Percent, Plus, RefreshCw, Trash2, Wallet, X,
+  Calculator, ChevronDown, ChevronUp, FileText, ImageIcon, Landmark, Pencil, Percent, Plus, RefreshCw, TrendingUp, Trash2, Wallet, X,
 } from 'lucide-react'
 import { Badge, Button, Card, Input, KpiTile, Modal, Select, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
@@ -10,21 +10,13 @@ import { apiError } from '@/api/client'
 import { num } from '@/api/material'
 import { formatCOP, formatDate, todayISO } from '@/utils/format'
 import { calcularCuota, tablaAmortizacion } from '@/utils/amortizacion'
-import { pagosPrestamosApi, type PrestamoFinanciero, type PrestamoPayload } from '@/api/pagosPrestamos'
+import {
+  pagosPrestamosApi, type PrestamoFinanciero, type PrestamoPayload, type MovimientoPrestamo, type ProyeccionInteresPrestamo,
+} from '@/api/pagosPrestamos'
+import { invalidateDeudaPrestamos } from '@/hooks/useDeudaPrestamos'
+import { invalidateBalanceTesoreria } from '@/hooks/useBalanceTesoreria'
 
 const cop = formatCOP
-
-// ── Abonos — TEMPORAL en localStorage hasta que el backend tenga endpoint de
-// abonos con historial (hoy /pagos/prestamos-financieros solo permite editar
-// saldo_pendiente directo por PUT/PATCH, sin dejar registro de fecha/nota/
-// comprobante por transacción). El saldo_pendiente SÍ se actualiza real en el
-// backend al registrar un abono — solo el detalle de cada transacción es local. ──
-interface AbonoPrestamo { id: number; id_prestamo: number; fecha: string; monto: number; nota?: string; comprobante_url?: string }
-const LS_ABONOS = 'molinos_abonos_prestamos_api_v1'
-function loadAbonos(): AbonoPrestamo[] {
-  try { const r = localStorage.getItem(LS_ABONOS); return r ? JSON.parse(r) : [] } catch { return [] }
-}
-function saveAbonos(d: AbonoPrestamo[]) { try { localStorage.setItem(LS_ABONOS, JSON.stringify(d)) } catch { /* quota */ } }
 
 // ── Plazo (meses) — TEMPORAL en localStorage: el backend no tiene este campo,
 // así que la tabla de amortización se calcula en el front (sistema francés) a
@@ -57,11 +49,18 @@ export function PrestamosFinancierosApiPage() {
   const toast = useToast()
   const { data, loading, error, reload } = usePrestamos()
 
+  // Historial real (interés + abonos) — se pide perezoso, solo al expandir.
+  const [movimientos, setMovimientos] = useState<Record<number, MovimientoPrestamo[]>>({})
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
-  const toggleExpand = (id: number) => setExpandedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-
-  const [abonos, setAbonos] = useState<AbonoPrestamo[]>(() => loadAbonos())
-  const abonosDe = (id: number) => abonos.filter(a => a.id_prestamo === id).sort((a, b) => b.fecha.localeCompare(a.fecha))
+  const toggleExpand = (id: number) => {
+    setExpandedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+    if (!movimientos[id]) {
+      pagosPrestamosApi.getMovimientos(id).then(r => setMovimientos(prev => ({ ...prev, [id]: Array.isArray(r) ? r : [] }))).catch(() => {})
+    }
+  }
+  const recargarMovimientos = (id: number) => {
+    pagosPrestamosApi.getMovimientos(id).then(r => setMovimientos(prev => ({ ...prev, [id]: Array.isArray(r) ? r : [] }))).catch(() => {})
+  }
 
   const [plazos, setPlazos] = useState<Record<number, number>>(() => loadPlazos())
   const plazoDe = (id: number): number | undefined => plazos[id] || undefined
@@ -108,6 +107,7 @@ export function PrestamosFinancierosApiPage() {
         const creado = await pagosPrestamosApi.crear(body)
         guardarPlazo(creado.id, plazoMeses)
         toast.success('Préstamo creado')
+        invalidateBalanceTesoreria() // genera un ingreso espejo en Tesorería
       } else if (modal) {
         await pagosPrestamosApi.actualizar(modal.id, {
           nombre_prestamo: form.nombre_prestamo.trim(), fecha_adquisicion: form.fecha_adquisicion,
@@ -117,12 +117,12 @@ export function PrestamosFinancierosApiPage() {
         guardarPlazo(modal.id, plazoMeses)
         toast.success('Préstamo actualizado')
       }
-      setModal(null); reload()
+      setModal(null); reload(); invalidateDeudaPrestamos()
     } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
   }
 
   const toggleActivo = async (p: PrestamoFinanciero) => {
-    try { await pagosPrestamosApi.actualizarParcial(p.id, { activo: !num(p.activo ?? 1) }); reload() }
+    try { await pagosPrestamosApi.actualizarParcial(p.id, { activo: !num(p.activo ?? 1) }); reload(); invalidateDeudaPrestamos() }
     catch (e) { toast.error(apiError(e).message) }
   }
 
@@ -134,43 +134,63 @@ export function PrestamosFinancierosApiPage() {
     try {
       await pagosPrestamosApi.eliminar(delPrestamo.id)
       toast.success('Préstamo eliminado')
-      setAbonos(prev => { const n = prev.filter(a => a.id_prestamo !== delPrestamo.id); saveAbonos(n); return n })
       guardarPlazo(delPrestamo.id, 0)
-      setDelPrestamo(null); reload()
+      setDelPrestamo(null); reload(); invalidateDeudaPrestamos()
+      invalidateBalanceTesoreria() // borra el ingreso espejo en cascada
     } catch (e) {
       const { status, message } = apiError(e)
-      toast.error(status === 409 ? 'Este préstamo ya tiene abonos registrados (saldo distinto al capital) y no se puede eliminar.' : message)
+      toast.error(status === 409 ? 'Este préstamo ya tuvo actividad (abonos o interés) y no se puede eliminar.' : message)
       setDelPrestamo(null)
     } finally { setDeleting(false) }
   }
 
-  // ── Registrar abono ──────────────────────────────────────────
+  // ── Registrar abono (real — POST /:id/abonos) ─────────────────
   const [abonoTarget, setAbonoTarget] = useState<PrestamoFinanciero | null>(null)
-  const [formAbono, setFormAbono] = useState({ fecha: todayISO(), monto: '', nota: '', comprobante_url: '' })
+  const [formAbono, setFormAbono] = useState({ fecha_abono: todayISO(), valor: '', metodo_pago: 'transferencia', observaciones: '', comprobante_url: '' })
   const [guardandoAbono, setGuardandoAbono] = useState(false)
-  const abrirAbono = (p: PrestamoFinanciero) => { setAbonoTarget(p); setFormAbono({ fecha: todayISO(), monto: '', nota: '', comprobante_url: '' }) }
+  const abrirAbono = (p: PrestamoFinanciero) => { setAbonoTarget(p); setFormAbono({ fecha_abono: todayISO(), valor: '', metodo_pago: 'transferencia', observaciones: '', comprobante_url: '' }) }
   const guardarAbono = async () => {
     if (!abonoTarget) return
-    const monto = Number(formAbono.monto) || 0
+    const valor = Number(formAbono.valor) || 0
     const saldoActual = num(abonoTarget.saldo_pendiente)
-    if (monto <= 0) { toast.error('Ingresa el monto del abono'); return }
-    if (monto > saldoActual) { toast.error(`El abono no puede superar el saldo pendiente (${cop(saldoActual)}).`); return }
+    if (valor <= 0) { toast.error('Ingresa el monto del abono'); return }
     setGuardandoAbono(true)
-    const nuevoSaldo = saldoActual - monto
     try {
-      await pagosPrestamosApi.actualizarParcial(abonoTarget.id, { saldo_pendiente: nuevoSaldo })
-      const registro: AbonoPrestamo = {
-        id: Date.now(), id_prestamo: abonoTarget.id, fecha: formAbono.fecha, monto,
-        nota: formAbono.nota.trim() || undefined, comprobante_url: formAbono.comprobante_url.trim() || undefined,
-      }
-      setAbonos(prev => { const n = [registro, ...prev]; saveAbonos(n); return n })
+      await pagosPrestamosApi.abonar(abonoTarget.id, {
+        valor, fecha_abono: formAbono.fecha_abono, metodo_pago: formAbono.metodo_pago,
+        comprobante_url: formAbono.comprobante_url.trim() || undefined, observaciones: formAbono.observaciones.trim() || undefined,
+      })
       toast.success('Abono registrado')
-      setAbonoTarget(null); reload()
-    } catch (e) { toast.error(apiError(e).message) } finally { setGuardandoAbono(false) }
+      setAbonoTarget(null); reload(); invalidateDeudaPrestamos(); invalidateBalanceTesoreria(); recargarMovimientos(abonoTarget.id)
+    } catch (e) {
+      const { status, message } = apiError(e)
+      toast.error(status === 409 ? `El abono no puede superar el saldo pendiente (${cop(saldoActual)}).` : message)
+    } finally { setGuardandoAbono(false) }
   }
-  const eliminarAbono = (a: AbonoPrestamo) => {
-    if (!confirm('¿Eliminar este abono del historial local? (no revierte el saldo en el backend)')) return
-    setAbonos(prev => { const n = prev.filter(x => x.id !== a.id); saveAbonos(n); return n })
+
+  // ── Capitalizar interés (real — GET proyección + POST /:id/interes) ──
+  const [interesTarget, setInteresTarget] = useState<PrestamoFinanciero | null>(null)
+  const [proyeccion, setProyeccion] = useState<ProyeccionInteresPrestamo | null>(null)
+  const [cargandoProyeccion, setCargandoProyeccion] = useState(false)
+  const [capitalizando, setCapitalizando] = useState(false)
+  const abrirInteres = (p: PrestamoFinanciero) => {
+    setInteresTarget(p); setProyeccion(null); setCargandoProyeccion(true)
+    pagosPrestamosApi.getProyeccionInteres(p.id)
+      .then(setProyeccion)
+      .catch(e => { toast.error(apiError(e).message); setInteresTarget(null) })
+      .finally(() => setCargandoProyeccion(false))
+  }
+  const confirmarCapitalizar = async () => {
+    if (!interesTarget) return
+    setCapitalizando(true)
+    try {
+      await pagosPrestamosApi.capitalizarInteres(interesTarget.id)
+      toast.success('Interés capitalizado')
+      setInteresTarget(null); reload(); invalidateDeudaPrestamos(); invalidateBalanceTesoreria(); recargarMovimientos(interesTarget.id)
+    } catch (e) {
+      const { status, message } = apiError(e)
+      toast.error(status === 409 ? 'Todavía no ha pasado un mes completo desde el último movimiento de este préstamo.' : message)
+    } finally { setCapitalizando(false) }
   }
 
   // ── Amortización (calculada en el front — el backend no tiene plazo) ────────
@@ -216,9 +236,9 @@ export function PrestamosFinancierosApiPage() {
           const capital = num(p.monto_principal)
           const saldo = num(p.saldo_pendiente)
           const abonado = capital - saldo
-          const pctPagado = capital > 0 ? Math.min(100, Math.round((abonado / capital) * 100)) : 0
+          const pctPagado = capital > 0 ? Math.min(100, Math.max(0, Math.round((abonado / capital) * 100))) : 0
           const expanded = expandedIds.has(p.id)
-          const historial = abonosDe(p.id)
+          const historial = movimientos[p.id] ?? []
           const activo = !!num(p.activo ?? 1)
 
           return (
@@ -254,6 +274,7 @@ export function PrestamosFinancierosApiPage() {
 
                 <div style={{ display: 'flex', gap: '0.375rem' }}>
                   {canWrite && saldo > 0.01 && <Button size="sm" onClick={() => abrirAbono(p)}>Registrar abono</Button>}
+                  {canWrite && saldo > 0.01 && <Button size="sm" variant="secondary" icon={<TrendingUp size={13} />} onClick={() => abrirInteres(p)}>Capitalizar interés</Button>}
                   {plazoDe(p.id) && <Button size="sm" variant="secondary" icon={<Calculator size={13} />} onClick={() => setDetalleAmort(p)}>Ver amortización</Button>}
                   {canWrite && <Button size="sm" variant="secondary" icon={<Pencil size={13} />} onClick={() => openEdit(p)} />}
                   {canWrite && <Button size="sm" variant="ghost" icon={<Trash2 size={13} />} onClick={() => setDelPrestamo(p)} />}
@@ -276,34 +297,29 @@ export function PrestamosFinancierosApiPage() {
                       Estado: <button className={`badge badge--${activo ? 'success' : 'neutral'}`} style={{ cursor: 'pointer', border: 'none' }} onClick={() => toggleActivo(p)}>{activo ? 'Activo' : 'Inactivo'}</button>
                     </p>
                   )}
-                  {historial.length > 0 ? (
+                  {!movimientos[p.id] ? (
+                    <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-faint)', margin: 0 }}>Cargando historial…</p>
+                  ) : historial.length > 0 ? (
                     <table className="data-table" style={{ margin: 0 }}>
                       <thead>
-                        <tr><th>Fecha</th><th style={{ textAlign: 'right' }}>Monto abonado</th><th>Nota</th><th>Comprobante</th>{canWrite && <th></th>}</tr>
+                        <tr><th>Fecha</th><th>Tipo</th><th style={{ textAlign: 'right' }}>Valor</th><th style={{ textAlign: 'right' }}>Saldo resultante</th><th>Observaciones</th></tr>
                       </thead>
                       <tbody>
-                        {historial.map(a => (
-                          <tr key={a.id}>
-                            <td style={{ fontSize: 'var(--fs-sm)' }}>{formatDate(a.fecha)}</td>
-                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--emerald-700)' }} className="mono">{cop(a.monto)}</td>
-                            <td style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{a.nota ?? '—'}</td>
-                            <td style={{ fontSize: 'var(--fs-sm)' }}>{a.comprobante_url
-                              ? <span style={{ color: 'var(--emerald-700)', cursor: 'pointer' }} onClick={() => window.open(a.comprobante_url!, '_blank', 'noopener,noreferrer')}>✓ Ver comprobante</span>
-                              : <em style={{ color: 'var(--text-faint)' }}>Sin adjunto</em>}</td>
-                            {canWrite && <td><Button variant="ghost" size="sm" icon={<Trash2 size={13} />} title="Eliminar del historial local" onClick={() => eliminarAbono(a)} /></td>}
+                        {historial.map(m => (
+                          <tr key={m.id}>
+                            <td style={{ fontSize: 'var(--fs-sm)' }}>{formatDate(m.fecha)}</td>
+                            <td><span className={`badge ${m.tipo === 'abono' ? 'badge--success' : 'badge--info'}`}>{m.tipo === 'abono' ? 'Abono' : 'Interés'}</span></td>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: m.tipo === 'abono' ? 'var(--emerald-700)' : 'var(--rose-600)' }} className="mono">
+                              {m.tipo === 'abono' ? '−' : '+'}{cop(num(m.valor))}
+                            </td>
+                            <td style={{ textAlign: 'right' }} className="mono">{cop(num(m.saldo_resultante))}</td>
+                            <td style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{m.observaciones ?? '—'}</td>
                           </tr>
                         ))}
                       </tbody>
-                      <tfoot>
-                        <tr style={{ fontWeight: 700 }}>
-                          <td>Total abonado</td>
-                          <td style={{ textAlign: 'right' }} className="mono">{cop(abonado)}</td>
-                          <td colSpan={canWrite ? 3 : 2} />
-                        </tr>
-                      </tfoot>
                     </table>
                   ) : (
-                    <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-faint)', margin: 0 }}>Sin abonos registrados aún.</p>
+                    <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-faint)', margin: 0 }}>Sin movimientos registrados aún.</p>
                   )}
                 </div>
               )}
@@ -337,16 +353,16 @@ export function PrestamosFinancierosApiPage() {
         </div>
       </Modal>
 
-      {/* ── Modal: Registrar abono (saldo real en backend; detalle temporal en localStorage) ── */}
+      {/* ── Modal: Registrar abono (real — POST /:id/abonos) ── */}
       {(() => {
         const saldoActual = abonoTarget ? num(abonoTarget.saldo_pendiente) : 0
-        const montoNum = Number(formAbono.monto) || 0
+        const valorNum = Number(formAbono.valor) || 0
         return (
           <Modal open={abonoTarget !== null} title={`Registrar abono — ${abonoTarget?.nombre_prestamo ?? ''}`}
             onClose={() => setAbonoTarget(null)}
             footer={<>
               <Button variant="secondary" onClick={() => setAbonoTarget(null)}>Cancelar</Button>
-              <Button onClick={guardarAbono} disabled={guardandoAbono || !formAbono.monto}>Registrar abono</Button>
+              <Button onClick={guardarAbono} disabled={guardandoAbono || !formAbono.valor}>Registrar abono</Button>
             </>}>
             {abonoTarget && (
               <div className="callout" style={{ marginBottom: '1rem' }}>
@@ -355,13 +371,15 @@ export function PrestamosFinancierosApiPage() {
               </div>
             )}
             <div className="grid grid--form">
-              <Input label="Fecha del abono" type="date" value={formAbono.fecha} onChange={e => setFormAbono(v => ({ ...v, fecha: e.target.value }))} />
-              <Input label="Monto abonado (COP)" type="number" mono step="1000" required placeholder="1000000"
-                value={formAbono.monto} onChange={e => setFormAbono(v => ({ ...v, monto: e.target.value }))} helper={`Máximo ${cop(saldoActual)}.`} />
-              <Input label="Nota (opcional)" placeholder="Cuota mensual de septiembre…" style={{ gridColumn: '1 / -1' }}
-                value={formAbono.nota} onChange={e => setFormAbono(v => ({ ...v, nota: e.target.value }))} />
+              <Input label="Fecha del abono" type="date" value={formAbono.fecha_abono} onChange={e => setFormAbono(v => ({ ...v, fecha_abono: e.target.value }))} />
+              <Input label="Valor abonado (COP)" type="number" mono step="1000" required placeholder="1000000"
+                value={formAbono.valor} onChange={e => setFormAbono(v => ({ ...v, valor: e.target.value }))} helper={`Máximo ${cop(saldoActual)}.`} />
+              <Select label="Método de pago" value={formAbono.metodo_pago} onChange={e => setFormAbono(v => ({ ...v, metodo_pago: e.target.value }))}
+                options={[{ value: 'transferencia', label: 'Transferencia' }, { value: 'efectivo', label: 'Efectivo' }, { value: 'nequi', label: 'Nequi' }, { value: 'deposito', label: 'Depósito' }, { value: 'otro', label: 'Otro' }]} />
+              <Input label="Observaciones (opcional)" placeholder="Cuota mensual de septiembre…" style={{ gridColumn: '1 / -1' }}
+                value={formAbono.observaciones} onChange={e => setFormAbono(v => ({ ...v, observaciones: e.target.value }))} />
               <div className="field" style={{ gridColumn: '1 / -1' }}>
-                <label className="field__label">Comprobante (imagen o PDF)</label>
+                <label className="field__label">Comprobante (imagen o PDF, opcional)</label>
                 {formAbono.comprobante_url ? (
                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '0.4rem 0.7rem', border: '1px solid var(--border)', borderRadius: 6, fontSize: 'var(--fs-sm)' }}>
                     <FileText size={15} />
@@ -378,21 +396,43 @@ export function PrestamosFinancierosApiPage() {
                       onChange={e => { const file = e.target.files?.[0]; if (file) setFormAbono(v => ({ ...v, comprobante_url: `http://localhost/${file.name}` })) }} />
                   </label>
                 )}
-                <span className="field__helper">Se sube desde tu dispositivo; por ahora se guarda la referencia local (temporal).</span>
               </div>
             </div>
-            {montoNum > 0 && abonoTarget && (
+            {valorNum > 0 && abonoTarget && (
               <div className="callout" style={{ marginTop: '0.75rem' }}>
-                Saldo tras el abono: <strong style={{ color: (saldoActual - montoNum) > 0 ? 'var(--rose-700)' : 'var(--green-700)' }}>{cop(Math.max(0, saldoActual - montoNum))}</strong>
+                Saldo tras el abono: <strong style={{ color: (saldoActual - valorNum) > 0 ? 'var(--rose-700)' : 'var(--green-700)' }}>{cop(Math.max(0, saldoActual - valorNum))}</strong>
               </div>
             )}
-            <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: '0.75rem' }}>
-              El saldo pendiente se guarda real en el backend. El detalle de este abono (fecha, nota, comprobante) se
-              guarda localmente por ahora — se migrará cuando el backend tenga un endpoint de abonos con historial.
-            </p>
           </Modal>
         )
       })()}
+
+      {/* ── Modal: Capitalizar interés (preview con /interes/proyeccion antes de confirmar) ── */}
+      <Modal open={interesTarget !== null} title={`Capitalizar interés — ${interesTarget?.nombre_prestamo ?? ''}`}
+        onClose={() => setInteresTarget(null)}
+        footer={<>
+          <Button variant="secondary" onClick={() => setInteresTarget(null)}>Cancelar</Button>
+          <Button onClick={confirmarCapitalizar} disabled={capitalizando || cargandoProyeccion || !proyeccion || proyeccion.meses_a_acumular <= 0}>
+            {capitalizando ? 'Capitalizando…' : 'Confirmar capitalización'}
+          </Button>
+        </>}>
+        {cargandoProyeccion ? (
+          <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem 0' }}>Calculando proyección…</p>
+        ) : proyeccion && proyeccion.meses_a_acumular > 0 ? (
+          <div className="grid grid--form">
+            <div className="callout" style={{ gridColumn: '1 / -1' }}>
+              Han pasado <strong>{proyeccion.meses_a_acumular}</strong> mes(es) completos desde el último movimiento de este préstamo.
+            </div>
+            <Badge tone="neutral">Saldo actual {cop(num(proyeccion.saldo_actual))}</Badge>
+            <Badge tone="warning">Interés a capitalizar {cop(num(proyeccion.interes_proyectado))}</Badge>
+            <Badge tone="danger">Saldo resultante {cop(num(proyeccion.saldo_si_se_acumula))}</Badge>
+          </div>
+        ) : (
+          <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem 0' }}>
+            Todavía no ha pasado un mes completo desde el último movimiento — no hay interés para capitalizar aún.
+          </p>
+        )}
+      </Modal>
 
       {/* ── Modal: Tabla de amortización (calculada en el front — plazo local) ── */}
       <Modal

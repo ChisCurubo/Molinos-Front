@@ -43,6 +43,9 @@ import { ProveedoresApiPage } from '@/pages/finanzas/ProveedoresApiPage'
 import { EmpleadosNominaApiPage } from '@/pages/finanzas/EmpleadosNominaApiPage'
 import { CalendarioTurnosApiPage } from '@/pages/finanzas/CalendarioTurnosApiPage'
 import { PrestamosFinancierosApiPage } from '@/pages/finanzas/PrestamosFinancierosApiPage'
+import { AlquileresApiPage } from '@/pages/finanzas/AlquileresApiPage'
+import { TesoreriaApiPage } from '@/pages/finanzas/TesoreriaApiPage'
+import { ImpuestosApiPage } from '@/pages/finanzas/ImpuestosApiPage'
 import { NominaPage } from '@/pages/nomina/NominaPage'
 import { CalendarioTurnosPage } from '@/pages/nomina/CalendarioTurnosPage'
 import { InformesNominaPage } from '@/pages/nomina/InformesNominaPage'
@@ -111,6 +114,9 @@ function AppRoutes() {
         <Route path="/finanzas/nominas-api" element={<ProtectedRoute module="finanzas"><EmpleadosNominaApiPage /></ProtectedRoute>} />
         <Route path="/finanzas/calendario-turnos-api" element={<ProtectedRoute module="finanzas"><CalendarioTurnosApiPage /></ProtectedRoute>} />
         <Route path="/finanzas/prestamos-api" element={<ProtectedRoute module="finanzas"><PrestamosFinancierosApiPage /></ProtectedRoute>} />
+        <Route path="/finanzas/alquileres-api" element={<ProtectedRoute module="finanzas"><AlquileresApiPage /></ProtectedRoute>} />
+        <Route path="/finanzas/tesoreria-api" element={<ProtectedRoute module="finanzas"><TesoreriaApiPage /></ProtectedRoute>} />
+        <Route path="/finanzas/impuestos-api" element={<ProtectedRoute module="finanzas"><ImpuestosApiPage /></ProtectedRoute>} />
 
         {/* Nómina */}
         <Route path="/nomina" element={<ProtectedRoute module="nomina"><NominaPage /></ProtectedRoute>} />

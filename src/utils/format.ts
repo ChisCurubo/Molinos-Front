@@ -39,6 +39,22 @@ export function todayISO(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
+/** Mes actual en formato YYYY-MM, para <input type="month"> y como tope de "no futuro". */
+export function mesActualISO(): string {
+  return todayISO().slice(0, 7)
+}
+
+const MESES_NOMBRE = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+/** "2026-10" → "Octubre 2026" */
+export function nombreMes(mesISO: string): string {
+  const [anio, mes] = mesISO.split('-').map(Number)
+  return `${MESES_NOMBRE[mes - 1]} ${anio}`
+}
+/** Nombre corto del mes por número (1-12), para ejes de gráficos. */
+export function nombreMesCorto(mes: number): string {
+  return MESES_NOMBRE[mes - 1]?.slice(0, 3) ?? String(mes)
+}
+
 /** Devuelve el precio aplicable según tenor y (opcionalmente) mineroId.
  *  Prioriza el precio específico del minero sobre el general. */
 export function getPrecioAplicable(

@@ -3,6 +3,7 @@ import { Button } from '@/components/ui'
 import { useAuth } from '@/context/AuthContext'
 import { ROLES } from '@/auth/permissions'
 import { AccessibilityMenu } from './AccessibilityMenu'
+import { BalanceWidget } from './BalanceWidget'
 
 interface TopBarProps {
   onToggleMenu: () => void
@@ -30,6 +31,8 @@ export function TopBar({ onToggleMenu }: TopBarProps) {
       </div>
 
       <div className="spacer" />
+
+      <BalanceWidget />
 
       <AccessibilityMenu />
 

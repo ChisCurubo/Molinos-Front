@@ -96,9 +96,4 @@ export const pagosApi = {
   getGastos: () => apiFetch<unknown[]>('/pagos/gastos'),
   createGasto: (body: unknown) => apiPost<unknown>('/pagos/gastos', body),
   updateGasto: (id: number, body: unknown) => apiPut<unknown>(`/pagos/gastos/${id}`, body),
-
-  // Alquileres
-  getAlquileres: () => apiFetch<unknown[]>('/pagos/alquileres'),
-  createAlquiler: (body: unknown) => apiPost<unknown>('/pagos/alquileres', body),
-  updateAlquiler: (id: number, body: unknown) => apiPut<unknown>(`/pagos/alquileres/${id}`, body),
 }

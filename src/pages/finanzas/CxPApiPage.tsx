@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Banknote, ChevronLeft, ChevronRight, Pencil, Plus, RefreshCw, Trash2, Wallet } from 'lucide-react'
+import { AlertTriangle, Banknote, ChevronLeft, ChevronRight, FileText, Pencil, Plus, RefreshCw, Trash2, Wallet } from 'lucide-react'
 import { Button, Card, Input, KpiTile, Modal, Select, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
+import { CHART_COLORS } from '@/components/charts/Charts'
 import { useCanWrite } from '@/hooks/usePermissions'
 import { apiError } from '@/api/client'
 import { num } from '@/api/material'
 import { formatCOP, formatDate, todayISO } from '@/utils/format'
-import { pagosCxpApi, type CxpCuenta, type CategoriaCxp } from '@/api/pagosCxp'
+import { pagosCxpApi, type CxpCuenta, type CategoriaCxp, type LibroGastoItem } from '@/api/pagosCxp'
 import { pagosApi, type Proveedor } from '@/api/pagos'
+import { pagosGastosDirectosApi, type GastoDirectoPayload, type MetodoPagoGastoDirecto } from '@/api/pagosGastosDirectos'
+import { invalidateBalanceTesoreria } from '@/hooks/useBalanceTesoreria'
+
+const CATEGORIA_GASTO_DIRECTO = 'Gasto Directo'
 
 // Igual que en Anticipos: los transportadores de mula no se pagan desde finanzas genérico.
 const CATEGORIA_MULA = 'Transporte_Mula'
@@ -53,12 +58,12 @@ function useCategoriasCxp() {
   return { data, loading, reload: load }
 }
 
-type PageTab = 'cuentas' | 'categorias'
+type PageTab = 'cuentas' | 'categorias' | 'gastos'
 
 export function CxPApiPage() {
   const canWrite = useCanWrite('finanzas')
   const toast = useToast()
-  const [tab, setTab] = useState<PageTab>('cuentas')
+  const [tab, setTab] = useState<PageTab>('gastos')
 
   const now = new Date()
   const [mes, setMes] = useState(now.getMonth() + 1)
@@ -134,29 +139,30 @@ export function CxPApiPage() {
   return (
     <div className="page">
       <PageHeader
-        title="Cuentas por pagar"
-        subtitle="Listado maestro de CxP de todos los módulos (Material, Flete, Agua, Mulas, Anticipos…) por mes."
+        title="Gastos"
+        subtitle="Dinero que sale: gastos reales ya pagados, cuentas por pagar pendientes y sus categorías."
         actions={canWrite && tab === 'cuentas' && <Button icon={<Plus size={18} />} onClick={abrirNueva}>Nueva cuenta suelta</Button>}
       />
       {!canWrite && <ReadOnlyBanner />}
 
-      <div className="callout" style={{ marginBottom: '1rem', display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 'var(--fs-sm)' }}>
-        <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2, color: 'var(--amber-700)' }} />
-        <span>
-          Este listado es genérico: junta las CxP de <strong>todos</strong> los módulos, pero desde aquí solo se puede pagar a <strong>proveedores</strong>.
-          Mineros y dueños de volqueta se pagan desde su módulo dedicado (Pago de material / Flete / Agua), y los transportadores de mula —aunque
-          son proveedores— solo se pagan desde Pago de mulas, para no saltarse esa cascada. "Pagar" aquí suma directo al saldo, sin dejar
-          historial de abonos individuales — úsalo solo para cuentas sueltas de proveedor sin módulo propio.
-        </span>
-      </div>
-
       <div className="segment" role="tablist" style={{ marginBottom: 18 }}>
+        <button role="tab" aria-selected={tab === 'gastos'} className={`segment__btn ${tab === 'gastos' ? 'segment__btn--active' : ''}`} onClick={() => setTab('gastos')}>Gastos</button>
         <button role="tab" aria-selected={tab === 'cuentas'} className={`segment__btn ${tab === 'cuentas' ? 'segment__btn--active' : ''}`} onClick={() => setTab('cuentas')}>Cuentas</button>
         <button role="tab" aria-selected={tab === 'categorias'} className={`segment__btn ${tab === 'categorias' ? 'segment__btn--active' : ''}`} onClick={() => setTab('categorias')}>Categorías</button>
       </div>
 
       {tab === 'cuentas' && (
         <>
+          <div className="callout" style={{ marginBottom: '1rem', display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 'var(--fs-sm)' }}>
+            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2, color: 'var(--amber-700)' }} />
+            <span>
+              Este listado es genérico: junta las CxP de <strong>todos</strong> los módulos, pero desde aquí solo se puede pagar a <strong>proveedores</strong>.
+              Mineros y dueños de volqueta se pagan desde su módulo dedicado (Pago de material / Flete / Agua), y los transportadores de mula —aunque
+              son proveedores— solo se pagan desde Pago de mulas, para no saltarse esa cascada. "Pagar" aquí suma directo al saldo, sin dejar
+              historial de abonos individuales — úsalo solo para cuentas sueltas de proveedor sin módulo propio.
+            </span>
+          </div>
+
           <div className="grid grid--kpi" style={{ marginBottom: '1rem' }}>
             <KpiTile label="Cuentas" value={resp?.pagination.total ?? 0} icon={<Wallet size={16} />} accent="emerald" />
             <KpiTile label="Total"   value={cop(totales.total)} accent="green" />
@@ -273,6 +279,8 @@ export function CxPApiPage() {
 
       {tab === 'categorias' && <CategoriasCxpTab canWrite={canWrite} categorias={categorias} />}
 
+      {tab === 'gastos' && <LibroGastosTab canWrite={canWrite} />}
+
       {/* ── Modal: Nueva cuenta suelta ── */}
       <Modal open={nuevaModal} title="Nueva cuenta por pagar a proveedor (suelta)" onClose={() => setNuevaModal(false)}
         footer={<>
@@ -311,6 +319,215 @@ export function CxPApiPage() {
         <Input label="Valor a pagar" type="number" mono step="1000" required value={pagoValor} onChange={e => setPagoValor(e.target.value)} />
       </Modal>
     </div>
+  )
+}
+
+// ── Gastos (Libro de Gastos) ──────────────────────────────────────
+// Ledger transaccional de TODOS los módulos (material/flete/agua/mulas/
+// alquiler/nómina/préstamos/gasto directo…) vía /pagos/vistas/libro-gastos —
+// cualquier CxP con abono ya es un gasto real, sin importar la categoría.
+// "Gasto directo" (antes Caja Menor) no es un caso especial: es solo una CxP
+// + su abono creados en el mismo paso, por eso ya aparece aquí solo.
+const METODO_GASTO_OPTS: { value: MetodoPagoGastoDirecto; label: string }[] = [
+  { value: 'efectivo',      label: 'Efectivo' },
+  { value: 'transferencia', label: 'Transferencia' },
+  { value: 'nequi',         label: 'Nequi' },
+  { value: 'deposito',      label: 'Depósito' },
+  { value: 'otro',          label: 'Otro' },
+]
+const emptyGastoDirectoForm = () => ({ concepto: '', monto: '', comprobante_url: '', fecha: todayISO(), metodo_pago: 'efectivo' as MetodoPagoGastoDirecto, observaciones: '' })
+
+function colorCategoria(categoria: string, color?: string | null, idx = 0): string {
+  if (color) return color
+  let hash = 0
+  for (let i = 0; i < categoria.length; i++) hash = (hash * 31 + categoria.charCodeAt(i)) | 0
+  return CHART_COLORS[Math.abs(hash || idx) % CHART_COLORS.length]
+}
+
+function LibroGastosTab({ canWrite }: { canWrite: boolean }) {
+  const toast = useToast()
+  const now = new Date()
+  const [mes, setMes] = useState(now.getMonth() + 1)
+  const [anio, setAnio] = useState(now.getFullYear())
+  const esMesActual = mes === now.getMonth() + 1 && anio === now.getFullYear()
+  const shiftMonth = (delta: number) => {
+    const d = new Date(anio, mes - 1 + delta, 1)
+    setMes(d.getMonth() + 1); setAnio(d.getFullYear())
+  }
+  const [fCategoria, setFCategoria] = useState('')
+  const [data, setData] = useState<LibroGastoItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const load = useCallback(() => {
+    setLoading(true); setError(null)
+    pagosCxpApi.getLibroGastos(mes, anio)
+      .then(r => setData(Array.isArray(r) ? r : []))
+      .catch(e => setError(apiError(e).message))
+      .finally(() => setLoading(false))
+  }, [mes, anio])
+  useEffect(() => { load() }, [load])
+
+  // El `id` que trae /pagos/vistas/libro-gastos para una fila "Gasto Directo"
+  // es en realidad el id del Abono_CxP (`id_abono`), no el id real del gasto
+  // directo — PATCH/DELETE contra /pagos/gastos-directos/:id con ese id dan
+  // 404 (confirmado en vivo). Hay que cruzar por `id_abono` para resolverlo.
+  const desde = `${anio}-${String(mes).padStart(2, '0')}-01`
+  const hasta = `${anio}-${String(mes).padStart(2, '0')}-${new Date(anio, mes, 0).getDate()}`
+  const [idRealPorAbono, setIdRealPorAbono] = useState<Map<number, number>>(new Map())
+  const [idsListos, setIdsListos] = useState(false)
+  useEffect(() => {
+    setIdsListos(false)
+    pagosGastosDirectosApi.listar({ desde, hasta })
+      .then(r => setIdRealPorAbono(new Map((Array.isArray(r) ? r : []).map(gd => [gd.id_abono, gd.id]))))
+      .catch(() => setIdRealPorAbono(new Map()))
+      .finally(() => setIdsListos(true))
+  }, [desde, hasta])
+
+  // ⚠️ Bug de backend detectado en vivo (2026-10-23): /pagos/vistas/libro-gastos
+  // (y también /pagos/vistas/flujo-caja) NO excluyen un Gasto Directo anulado —
+  // sigue apareciendo con su monto completo aunque DELETE ya lo haya borrado de
+  // /pagos/gastos-directos. Se filtra acá cruzando contra esa lista real (sí la
+  // excluye) para que esta tabla y su total no muestren gastos anulados; el
+  // balance del TopBar (que lee flujo-caja directo) sigue mal hasta que el
+  // backend lo corrija — no se puede arreglar desde el front.
+  const visibles = useMemo(() => {
+    if (!idsListos) return data
+    return data.filter(g => g.categoria !== CATEGORIA_GASTO_DIRECTO || idRealPorAbono.has(g.id))
+  }, [data, idsListos, idRealPorAbono])
+
+  const categoriasPresentes = useMemo(() => Array.from(new Set(visibles.map(g => g.categoria))).sort(), [visibles])
+  const filtrados = useMemo(() => fCategoria ? visibles.filter(g => g.categoria === fCategoria) : visibles, [visibles, fCategoria])
+  const total = useMemo(() => filtrados.reduce((s, g) => s + num(g.monto), 0), [filtrados])
+
+  // ── Nuevo gasto directo ──────────────────────────────────────
+  const [modal, setModal] = useState<null | 'nuevo' | LibroGastoItem>(null)
+  const [form, setForm] = useState(emptyGastoDirectoForm())
+  const [saving, setSaving] = useState(false)
+  const abrirNuevo = () => { setForm(emptyGastoDirectoForm()); setModal('nuevo') }
+  const abrirEdit = (g: LibroGastoItem) => {
+    const idReal = idRealPorAbono.get(g.id)
+    if (idReal == null) { toast.error('No se pudo identificar este gasto directo — refresca e intenta de nuevo.'); return }
+    setForm({ concepto: g.concepto, monto: String(num(g.monto)), comprobante_url: g.comprobante_url ?? '', fecha: g.fecha.slice(0, 10), metodo_pago: g.metodo_pago as MetodoPagoGastoDirecto, observaciones: g.observaciones ?? '' })
+    setModal({ ...g, id: idReal })
+  }
+  const guardar = async () => {
+    if (!form.concepto.trim() || !(Number(form.monto) > 0) || !form.comprobante_url.trim()) {
+      toast.error('Concepto, monto y comprobante son obligatorios'); return
+    }
+    const body: GastoDirectoPayload = {
+      concepto: form.concepto.trim(), monto: Number(form.monto), comprobante_url: form.comprobante_url.trim(),
+      fecha: form.fecha || undefined, metodo_pago: form.metodo_pago, observaciones: form.observaciones.trim() || undefined,
+    }
+    setSaving(true)
+    try {
+      if (modal === 'nuevo') { await pagosGastosDirectosApi.crear(body); toast.success('Gasto directo registrado') }
+      else if (modal) { await pagosGastosDirectosApi.actualizar(modal.id, body); toast.success('Gasto directo actualizado') }
+      setModal(null); load(); invalidateBalanceTesoreria()
+    } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
+  }
+
+  const [delGasto, setDelGasto] = useState<LibroGastoItem | null>(null)
+  const [anulando, setAnulando] = useState(false)
+  const confirmAnular = async () => {
+    if (!delGasto) return
+    setAnulando(true)
+    try { await pagosGastosDirectosApi.anular(delGasto.id); toast.success('Gasto directo anulado'); setDelGasto(null); load(); invalidateBalanceTesoreria() }
+    catch (e) { toast.error(apiError(e).message); setDelGasto(null) } finally { setAnulando(false) }
+  }
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1rem', padding: '0.75rem 1rem', background: '#fafaf9', border: '1px solid #e5e7eb', borderRadius: 'var(--radius-md)' }}>
+        <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+          <button type="button" onClick={() => shiftMonth(-1)} title="Mes anterior"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: '#fff', cursor: 'pointer' }}>
+            <ChevronLeft size={18} />
+          </button>
+          <span style={{ fontWeight: 700, minWidth: '11rem', textAlign: 'center' }}>{MESES[mes - 1]} {anio}{esMesActual && <span className="badge badge--warning" style={{ marginLeft: '0.5rem' }}>Actual</span>}</span>
+          <button type="button" onClick={() => shiftMonth(1)} disabled={esMesActual} title="Mes siguiente"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: '#fff', cursor: esMesActual ? 'not-allowed' : 'pointer', color: esMesActual ? 'var(--text-faint)' : 'var(--text)' }}>
+            <ChevronRight size={18} />
+          </button>
+        </div>
+        <div style={{ width: 1, height: 30, background: '#e5e7eb' }} />
+        <select className="field__select" style={{ maxWidth: '13rem' }} value={fCategoria} onChange={e => setFCategoria(e.target.value)}>
+          <option value="">Todas las categorías</option>
+          {categoriasPresentes.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={load}>Refrescar</Button>
+        {canWrite && <Button size="sm" icon={<Plus size={16} />} onClick={abrirNuevo} style={{ marginLeft: 'auto' }}>Nuevo gasto directo</Button>}
+      </div>
+
+      <Card title={`Gastos de ${MESES[mes - 1]} ${anio} (${filtrados.length})`} actions={<strong className="mono">Total: {cop(total)}</strong>}>
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead><tr>
+              <th>Fecha</th><th>Categoría</th><th style={{ minWidth: '14rem' }}>Concepto</th><th>Beneficiario</th>
+              <th style={{ textAlign: 'right' }}>Monto</th><th>Comprobante</th>{canWrite && <th></th>}
+            </tr></thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={canWrite ? 7 : 6} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Cargando…</td></tr>
+              ) : error ? (
+                <tr><td colSpan={canWrite ? 7 : 6} style={{ textAlign: 'center', padding: '2rem', color: 'var(--rose-600)' }}>
+                  {error} · <button onClick={load} style={{ background: 'none', border: 'none', color: 'var(--amber-700)', textDecoration: 'underline', cursor: 'pointer' }}>Reintentar</button>
+                </td></tr>
+              ) : filtrados.length === 0 ? (
+                <tr><td colSpan={canWrite ? 7 : 6} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Sin gastos para {MESES[mes - 1]} {anio}.</td></tr>
+              ) : filtrados.map((g, i) => (
+                <tr key={g.id}>
+                  <td style={{ whiteSpace: 'nowrap' }}>{formatDate(g.fecha)}</td>
+                  <td><span className="badge" style={{ background: colorCategoria(g.categoria, g.color, i) + '22', color: colorCategoria(g.categoria, g.color, i) }}>{g.categoria}</span></td>
+                  <td>{g.concepto}</td>
+                  <td style={{ color: 'var(--text-faint)' }}>{g.beneficiario ?? '—'}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--rose-600)' }} className="mono">{cop(num(g.monto))}</td>
+                  <td>
+                    {g.comprobante_url
+                      ? <Button variant="ghost" size="sm" icon={<FileText size={13} />} onClick={() => window.open(g.comprobante_url!, '_blank', 'noopener,noreferrer')} />
+                      : <span style={{ color: 'var(--text-faint)' }}>—</span>}
+                  </td>
+                  {canWrite && (
+                    <td>
+                      {g.categoria === CATEGORIA_GASTO_DIRECTO && (
+                        <div className="row" style={{ gap: 4 }}>
+                          <Button variant="secondary" size="sm" icon={<Pencil size={14} />} onClick={() => abrirEdit(g)} />
+                          <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => {
+                            const idReal = idRealPorAbono.get(g.id)
+                            if (idReal == null) { toast.error('No se pudo identificar este gasto directo — refresca e intenta de nuevo.'); return }
+                            setDelGasto({ ...g, id: idReal })
+                          }} />
+                        </div>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {/* ── Modal: Nuevo/editar gasto directo ── */}
+      <Modal open={modal !== null} title={modal === 'nuevo' ? 'Nuevo gasto directo' : 'Editar gasto directo'} onClose={() => setModal(null)}
+        footer={<>
+          <Button variant="secondary" onClick={() => setModal(null)}>Cancelar</Button>
+          <Button onClick={guardar} disabled={saving || !form.concepto.trim() || !(Number(form.monto) > 0) || !form.comprobante_url.trim()}>{saving ? 'Guardando…' : 'Guardar'}</Button>
+        </>}>
+        <div className="callout" style={{ marginBottom: '1rem', fontSize: 'var(--fs-sm)' }}>
+          Gasto ya pagado en el momento (parqueadero, peaje, lavado…) — se crea como cuenta por pagar ya cancelada, con su abono, en un solo paso.
+        </div>
+        <div className="grid grid--form">
+          <Input label="Concepto" required style={{ gridColumn: '1 / -1' }} placeholder="Peaje, parqueadero, lavado de volqueta…" value={form.concepto} onChange={e => setForm(s => ({ ...s, concepto: e.target.value }))} />
+          <Input label="Monto" type="number" mono step="1000" required value={form.monto} onChange={e => setForm(s => ({ ...s, monto: e.target.value }))} />
+          <Select label="Método de pago" value={form.metodo_pago} onChange={e => setForm(s => ({ ...s, metodo_pago: e.target.value as MetodoPagoGastoDirecto }))} options={METODO_GASTO_OPTS} />
+          <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm(s => ({ ...s, fecha: e.target.value }))} />
+          <Input label="Comprobante (URL)" required style={{ gridColumn: '1 / -1' }} placeholder="https://…/comprobante.png" value={form.comprobante_url} onChange={e => setForm(s => ({ ...s, comprobante_url: e.target.value }))} />
+          <Input label="Observaciones (opcional)" style={{ gridColumn: '1 / -1' }} value={form.observaciones} onChange={e => setForm(s => ({ ...s, observaciones: e.target.value }))} />
+        </div>
+      </Modal>
+
+      <ConfirmDeleteModal open={!!delGasto} title="Anular gasto directo" itemLabel={delGasto?.concepto} loading={anulando} onCancel={() => setDelGasto(null)} onConfirm={confirmAnular} />
+    </>
   )
 }
 

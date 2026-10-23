@@ -58,6 +58,23 @@ export interface CategoriaCxp {
   nombre: string
 }
 
+// Libro de Gastos: una fila por cada Abono_CxP real, cruzando TODOS los
+// módulos (material/flete/agua/mulas/alquiler/nómina/préstamos/gasto
+// directo/etc.) — ver GET /pagos/vistas/libro-gastos. El total de `monto`
+// de un mes cuadra exacto con `gastos.total` de /pagos/vistas/flujo-caja.
+export interface LibroGastoItem {
+  id: number
+  fecha: string
+  categoria: string
+  color?: string | null
+  concepto: string
+  beneficiario?: string | null
+  monto: Dec
+  metodo_pago: string
+  comprobante_url?: string | null
+  observaciones?: string | null
+}
+
 export interface CrearCxpPayload {
   id_proveedor?: number
   id_minero?: number
@@ -91,6 +108,10 @@ export const pagosCxpApi = {
   // "Pago rápido": suma directo a valor_pagado, sin registro de abono individual.
   pagar: (id: number, pagoAdicional: number) =>
     apiPost<CxpCuenta>(`/pagos/cxp/${id}/pagar`, { pagoAdicional }),
+
+  // Libro de gastos: ledger transaccional (no agregado) de todos los módulos.
+  getLibroGastos: (mes?: number, anio?: number) =>
+    apiFetch<LibroGastoItem[]>(`/pagos/vistas/libro-gastos${qs({ mes, anio })}`),
 
   // Categorías (catálogo compartido por todos los módulos de pago).
   getCategorias: () => apiFetch<CategoriaCxp[]>('/pagos/cxp/categorias'),
