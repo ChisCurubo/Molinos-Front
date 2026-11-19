@@ -7,6 +7,7 @@ import { num } from '@/api/material'
 import {
   useMinas, useMineros, useZonas, useVolquetas, useDuenos, useTiposMaterial,
 } from '@/hooks/useMaterialCatalogos'
+import { useCuentasBancarias } from '@/hooks/useCuentasBancarias'
 
 interface BaseSelectorProps {
   label?: string
@@ -117,6 +118,26 @@ export function TipoMaterialSelect({ label = 'Tipo de material', value, onChange
       placeholder={loading ? 'Cargando…' : placeholder}
       error={error ?? undefined}
       options={data.map(t => ({ value: String(t.id), label: t.nombre }))}
+    />
+  )
+}
+
+// ── Cuenta bancaria (de dónde sale/entra la plata) ──────────────────────────
+// Opcional en todos los abonos: si no se elige nada, el pago queda como
+// efectivo/sin cuenta y el backend no cobra 4×1000. Solo muestra cuentas
+// activas — las inactivas no deben recibir movimientos nuevos.
+export function CuentaBancariaSelect({ label = 'Cuenta bancaria', value, onChange, placeholder = '— Efectivo / sin cuenta —', required, disabled, helper }: BaseSelectorProps & { helper?: string }) {
+  const { data, loading } = useCuentasBancarias()
+  const activas = data.filter(c => c.activa !== false && c.activa !== 0)
+  return (
+    <Select
+      label={label} required={required}
+      disabled={disabled || loading}
+      value={value === '' ? '' : String(value)}
+      onChange={useSelectHandler(onChange)}
+      placeholder={loading ? 'Cargando…' : placeholder}
+      helper={helper}
+      options={activas.map(c => ({ value: String(c.id), label: `${c.nombre} · ${c.banco}` }))}
     />
   )
 }

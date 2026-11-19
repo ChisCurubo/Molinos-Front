@@ -2,7 +2,7 @@
 // Tipos del dominio — Molinos de Colombia S.A.S
 // ============================================================
 
-export type Role = 'administrador' | 'materiales' | 'financiero'
+export type Role = 'administrador' | 'materiales' | 'financiero' | 'importaciones'
 
 export interface User {
   id: string

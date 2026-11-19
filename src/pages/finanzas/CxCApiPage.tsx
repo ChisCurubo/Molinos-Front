@@ -11,18 +11,16 @@ import { pagosCxcApi, type CxcCuenta, type CategoriaCxc, type CrearCxcPayload, t
 import { pagosIngresosApi, type Ingreso, type IngresoPayload, type CategoriaIngreso } from '@/api/pagosIngresos'
 import { pagosApi, type Proveedor } from '@/api/pagos'
 import { MineroSelect, DuenoSelect } from '@/components/common/CatalogSelectors'
+import { ComprobanteInput } from '@/components/common/ComprobanteInput'
 import { useEmpleados, EmpleadoSelect } from '@/pages/nomina/empleadosShared'
 import { invalidateBalanceTesoreria } from '@/hooks/useBalanceTesoreria'
+import { CuentasBancariasTab } from './CuentasBancariasTab'
+import { ImpuestosInfoTab } from './ImpuestosInfoTab'
+import { useCuentasBancarias } from '@/hooks/useCuentasBancarias'
+import { abrirUrl } from '@/utils/safeUrl'
 
 const cop = formatCOP
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
-const ESTADO_OPTS = [
-  { value: 'todos',     label: 'Todos los estados' },
-  { value: 'pendiente', label: 'Pendiente' },
-  { value: 'parcial',   label: 'Parcial' },
-  { value: 'pagado',    label: 'Pagado' },
-]
-
 // ── Orden de tabla por columna, clic para alternar asc/desc — reusado en
 // las pestañas Ingresos y Cuentas. ──
 type SortDir = 'asc' | 'desc'
@@ -109,7 +107,7 @@ function useCategoriasCxc() {
   return { data, loading, reload: load }
 }
 
-type PageTab = 'ingresos' | 'cuentas' | 'categorias'
+type PageTab = 'ingresos' | 'cuentas' | 'categorias' | 'cuentas_bancarias' | 'impuestos'
 
 export function CxCApiPage() {
   const canWrite = useCanWrite('finanzas')
@@ -128,7 +126,7 @@ export function CxCApiPage() {
   const categorias = useCategoriasCxc()
   const [page, setPage] = useState(1)
   const [fCategoriaCxc, setFCategoriaCxc] = useState<number | ''>('')
-  const [fEstadoCxc, setFEstadoCxc] = useState('todos')
+  const [cuentaSubTab, setCuentaSubTab] = useState<'pendientes' | 'cobradas'>('pendientes')
   const [buscaCxc, setBuscaCxc] = useState('')
   const [sortCxc, setSortCxc] = useState<SortState>({ key: 'fecha', dir: 'desc' })
   const [resp, setResp] = useState<{ cuentas: CxcCuenta[]; pagination: { page: number; total: number; total_pages: number } } | null>(null)
@@ -136,15 +134,21 @@ export function CxCApiPage() {
   const [error, setError] = useState<string | null>(null)
   const load = useCallback(() => {
     setLoading(true); setError(null)
-    pagosCxcApi.getMensual({ mes, anio, id_categoria: fCategoriaCxc || undefined, estado: fEstadoCxc !== 'todos' ? fEstadoCxc : undefined, page, limit: 50 })
+    pagosCxcApi.getMensual({ mes, anio, id_categoria: fCategoriaCxc || undefined, estado: cuentaSubTab === 'cobradas' ? 'pagado' : undefined, page, limit: 50 })
       .then(setResp)
       .catch(e => setError(apiError(e).message))
       .finally(() => setLoading(false))
-  }, [mes, anio, fCategoriaCxc, fEstadoCxc, page])
-  useEffect(() => { setPage(1) }, [mes, anio, fCategoriaCxc, fEstadoCxc])
+  }, [mes, anio, fCategoriaCxc, cuentaSubTab, page])
+  useEffect(() => { setPage(1) }, [mes, anio, fCategoriaCxc, cuentaSubTab])
   useEffect(() => { load() }, [load])
 
-  const cuentas = resp?.cuentas ?? []
+  // En "Pendientes" el backend trae todos los estados (igual que antes con el
+  // filtro "Todos") — se ocultan las ya cobradas acá para no duplicar con la
+  // pestaña "Cobradas", que sí filtra por estado=pagado en el servidor.
+  const cuentas = useMemo(() => {
+    const todas = resp?.cuentas ?? []
+    return cuentaSubTab === 'pendientes' ? todas.filter(c => c.estado !== 'pagado') : todas
+  }, [resp, cuentaSubTab])
   const cuentasVisibles = useMemo(() => {
     let list = cuentas
     if (buscaCxc.trim()) {
@@ -216,18 +220,17 @@ export function CxCApiPage() {
 
   // ── Abonar (cobro) ───────────────────────────────────────────
   const [abonoTarget, setAbonoTarget] = useState<CxcCuenta | null>(null)
-  const [aForm, setAForm] = useState({ valor: '', fecha_cobro: todayISO(), metodo: 'transferencia', comprobante_url: '' })
+  const [aForm, setAForm] = useState({ valor: '', fecha_cobro: todayISO(), metodo: 'transferencia', comprobante: null as File | null })
   const [savingAbono, setSavingAbono] = useState(false)
-  const abrirAbono = (c: CxcCuenta) => { setAForm({ valor: String(num(c.saldo)), fecha_cobro: todayISO(), metodo: 'transferencia', comprobante_url: '' }); setAbonoTarget(c) }
+  const abrirAbono = (c: CxcCuenta) => { setAForm({ valor: String(num(c.saldo)), fecha_cobro: todayISO(), metodo: 'transferencia', comprobante: null }); setAbonoTarget(c) }
   const guardarAbono = async () => {
     if (!abonoTarget) return
     const valor = Number(aForm.valor)
     if (!(valor > 0)) { toast.error('El valor debe ser mayor a 0'); return }
-    if (!aForm.comprobante_url.trim()) { toast.error('El comprobante es obligatorio'); return }
     setSavingAbono(true)
     try {
-      const body: AbonoCxcPayload = { valor, comprobante_url: aForm.comprobante_url.trim(), fecha_cobro: aForm.fecha_cobro, metodo: aForm.metodo }
-      await pagosCxcApi.abonar(abonoTarget.id, body)
+      const body: AbonoCxcPayload = { valor, fecha_cobro: aForm.fecha_cobro, metodo: aForm.metodo }
+      await pagosCxcApi.abonar(abonoTarget.id, body, aForm.comprobante)
       toast.success('Cobro registrado'); setAbonoTarget(null); load(); invalidateBalanceTesoreria()
     } catch (e) { toast.error(apiError(e).message) } finally { setSavingAbono(false) }
   }
@@ -242,9 +245,15 @@ export function CxCApiPage() {
         <button role="tab" aria-selected={tab === 'ingresos'} className={`segment__btn ${tab === 'ingresos' ? 'segment__btn--active' : ''}`} onClick={() => setTab('ingresos')}>Ingresos</button>
         <button role="tab" aria-selected={tab === 'cuentas'} className={`segment__btn ${tab === 'cuentas' ? 'segment__btn--active' : ''}`} onClick={() => setTab('cuentas')}>Cuentas</button>
         <button role="tab" aria-selected={tab === 'categorias'} className={`segment__btn ${tab === 'categorias' ? 'segment__btn--active' : ''}`} onClick={() => setTab('categorias')}>Categorías</button>
+        <button role="tab" aria-selected={tab === 'cuentas_bancarias'} className={`segment__btn ${tab === 'cuentas_bancarias' ? 'segment__btn--active' : ''}`} onClick={() => setTab('cuentas_bancarias')}>Cuentas bancarias</button>
+        <button role="tab" aria-selected={tab === 'impuestos'} className={`segment__btn ${tab === 'impuestos' ? 'segment__btn--active' : ''}`} onClick={() => setTab('impuestos')}>Impuestos</button>
       </div>
 
       {tab === 'ingresos' && <IngresosDirectosTab canWrite={canWrite} />}
+
+      {tab === 'cuentas_bancarias' && <CuentasBancariasTab canWrite={canWrite} />}
+
+      {tab === 'impuestos' && <ImpuestosInfoTab modulo="ingresos" />}
 
       {tab === 'cuentas' && (
         <>
@@ -257,7 +266,7 @@ export function CxCApiPage() {
           </div>
 
           <div className="grid grid--kpi" style={{ marginBottom: '1rem' }}>
-            <KpiTile label="Cuentas" value={resp?.pagination.total ?? 0} icon={<ArrowDownCircle size={16} />} accent="emerald" />
+            <KpiTile label="Cuentas" value={cuentas.length} icon={<ArrowDownCircle size={16} />} accent="emerald" />
             <KpiTile label="Saldo por cobrar" value={cop(totalSaldo)} accent="rose" />
           </div>
 
@@ -278,14 +287,17 @@ export function CxCApiPage() {
               <option value="">Todas las categorías</option>
               {categorias.data.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
-            <select className="field__select" style={{ maxWidth: '11rem' }} value={fEstadoCxc} onChange={e => setFEstadoCxc(e.target.value)}>
-              {ESTADO_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            <div className="segment" role="tablist" style={{ padding: '0.15rem' }}>
+              <button role="tab" aria-selected={cuentaSubTab === 'pendientes'} className={`segment__btn ${cuentaSubTab === 'pendientes' ? 'segment__btn--active' : ''}`}
+                style={{ padding: '0.4rem 0.8rem', fontSize: 'var(--fs-sm)', minHeight: 'auto' }} onClick={() => setCuentaSubTab('pendientes')}>Pendientes</button>
+              <button role="tab" aria-selected={cuentaSubTab === 'cobradas'} className={`segment__btn ${cuentaSubTab === 'cobradas' ? 'segment__btn--active' : ''}`}
+                style={{ padding: '0.4rem 0.8rem', fontSize: 'var(--fs-sm)', minHeight: 'auto' }} onClick={() => setCuentaSubTab('cobradas')}>Cobradas</button>
+            </div>
             <Input label="Buscar" placeholder="Concepto o deudor…" value={buscaCxc} onChange={e => setBuscaCxc(e.target.value)} style={{ maxWidth: '16rem' }} />
             <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={load} style={{ marginLeft: 'auto' }}>Refrescar</Button>
           </div>
 
-          <Card title={`Cuentas por cobrar (${cuentasVisibles.length} de ${resp?.pagination.total ?? 0})`}>
+          <Card title={`Cuentas por cobrar — ${cuentaSubTab === 'cobradas' ? 'Cobradas' : 'Pendientes'} (${cuentasVisibles.length})`}>
             <div className="table-wrap">
               <table className="data-table">
                 <thead><tr>
@@ -302,7 +314,9 @@ export function CxCApiPage() {
                       {error} · <button onClick={load} style={{ background: 'none', border: 'none', color: 'var(--amber-700)', textDecoration: 'underline', cursor: 'pointer' }}>Reintentar</button>
                     </td></tr>
                   ) : cuentasVisibles.length === 0 ? (
-                    <tr><td colSpan={canWrite ? 4 : 3} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Sin cuentas para {MESES[mes - 1]} {anio}.</td></tr>
+                    <tr><td colSpan={canWrite ? 4 : 3} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                      Sin cuentas {cuentaSubTab === 'cobradas' ? 'cobradas' : 'pendientes'} para {MESES[mes - 1]} {anio}.
+                    </td></tr>
                   ) : cuentasVisibles.map(c => (
                     <tr key={c.id}>
                       <td>
@@ -385,7 +399,7 @@ export function CxCApiPage() {
       <Modal open={abonoTarget != null} title={`Abonar — ${abonoTarget?.concepto ?? ''}`} onClose={() => setAbonoTarget(null)}
         footer={<>
           <Button variant="secondary" onClick={() => setAbonoTarget(null)}>Cancelar</Button>
-          <Button icon={<Banknote size={16} />} onClick={guardarAbono} disabled={savingAbono || !(Number(aForm.valor) > 0) || !aForm.comprobante_url.trim()}>{savingAbono ? 'Guardando…' : 'Registrar cobro'}</Button>
+          <Button icon={<Banknote size={16} />} onClick={guardarAbono} disabled={savingAbono || !(Number(aForm.valor) > 0)}>{savingAbono ? 'Guardando…' : 'Registrar cobro'}</Button>
         </>}>
         {abonoTarget && (
           <div className="callout" style={{ marginBottom: '1rem' }}>
@@ -397,7 +411,7 @@ export function CxCApiPage() {
           <Select label="Método de pago" value={aForm.metodo} onChange={e => setAForm(s => ({ ...s, metodo: e.target.value }))}
             options={[{ value: 'transferencia', label: 'Transferencia' }, { value: 'efectivo', label: 'Efectivo' }, { value: 'nequi', label: 'Nequi' }, { value: 'deposito', label: 'Depósito' }, { value: 'otro', label: 'Otro' }]} />
           <Input label="Fecha" type="date" value={aForm.fecha_cobro} onChange={e => setAForm(s => ({ ...s, fecha_cobro: e.target.value }))} />
-          <Input label="Comprobante (URL)" required style={{ gridColumn: '1 / -1' }} placeholder="https://…/comprobante.png" value={aForm.comprobante_url} onChange={e => setAForm(s => ({ ...s, comprobante_url: e.target.value }))} />
+          <ComprobanteInput style={{ gridColumn: '1 / -1' }} value={aForm.comprobante} onChange={file => setAForm(s => ({ ...s, comprobante: file }))} />
         </div>
       </Modal>
 
@@ -411,7 +425,7 @@ export function CxCApiPage() {
 // repite acá a propósito, como pidió el usuario, para que "Ingresos" en este
 // módulo sea un único lugar: directos + cuentas por cobrar cobradas (pestaña
 // "Cuentas" al lado). Ver TesoreriaApiPage.tsx para la otra superficie.
-const emptyIngresoForm = () => ({ id_categoria: '' as number | '', concepto: '', valor: '', fecha: todayISO(), comprobante_url: '' })
+const emptyIngresoForm = () => ({ id_categoria: '' as number | '', concepto: '', valor: '', fecha: todayISO(), comprobante: null as File | null })
 
 function IngresosDirectosTab({ canWrite }: { canWrite: boolean }) {
   const toast = useToast()
@@ -428,6 +442,8 @@ function IngresosDirectosTab({ canWrite }: { canWrite: boolean }) {
   const hasta = `${anio}-${String(mes).padStart(2, '0')}-${new Date(anio, mes, 0).getDate()}`
 
   const [fCategoria, setFCategoria] = useState<number | ''>('')
+  const [fCuentaBancaria, setFCuentaBancaria] = useState<number | ''>('')
+  const cuentasBancarias = useCuentasBancarias()
   const [busca, setBusca] = useState('')
   const [sort, setSort] = useState<SortState>({ key: 'fecha', dir: 'desc' })
 
@@ -436,11 +452,11 @@ function IngresosDirectosTab({ canWrite }: { canWrite: boolean }) {
   const [error, setError] = useState<string | null>(null)
   const load = useCallback(() => {
     setLoading(true); setError(null)
-    pagosIngresosApi.listar({ desde, hasta, id_categoria: fCategoria || undefined })
+    pagosIngresosApi.listar({ desde, hasta, id_categoria: fCategoria || undefined, id_cuenta_bancaria: fCuentaBancaria || undefined })
       .then(r => setData(Array.isArray(r) ? r : []))
       .catch(e => setError(apiError(e).message))
       .finally(() => setLoading(false))
-  }, [desde, hasta, fCategoria])
+  }, [desde, hasta, fCategoria, fCuentaBancaria])
   useEffect(() => { load() }, [load])
 
   const visibles = useMemo(() => {
@@ -464,13 +480,13 @@ function IngresosDirectosTab({ canWrite }: { canWrite: boolean }) {
   const [form, setForm] = useState(emptyIngresoForm())
   const [saving, setSaving] = useState(false)
   const abrirNuevo = () => { setForm(emptyIngresoForm()); setModal('nuevo') }
-  const abrirEdit = (i: Ingreso) => { setForm({ id_categoria: i.id_categoria, concepto: i.concepto, valor: String(num(i.valor)), fecha: i.fecha?.slice(0, 10) ?? todayISO(), comprobante_url: i.comprobante_url ?? '' }); setModal(i) }
+  const abrirEdit = (i: Ingreso) => { setForm({ id_categoria: i.id_categoria, concepto: i.concepto, valor: String(num(i.valor)), fecha: i.fecha?.slice(0, 10) ?? todayISO(), comprobante: null }); setModal(i) }
   const guardar = async () => {
     if (!form.concepto.trim() || !form.valor || form.id_categoria === '') { toast.error('Concepto, categoría y valor son obligatorios'); return }
-    const body: IngresoPayload = { id_categoria: form.id_categoria, concepto: form.concepto.trim(), valor: Number(form.valor), fecha: form.fecha, comprobante_url: form.comprobante_url.trim() || undefined }
+    const body: IngresoPayload = { id_categoria: form.id_categoria, concepto: form.concepto.trim(), valor: Number(form.valor), fecha: form.fecha }
     setSaving(true)
     try {
-      if (modal === 'nuevo') { await pagosIngresosApi.crear(body); toast.success('Ingreso registrado') }
+      if (modal === 'nuevo') { await pagosIngresosApi.crear(body, form.comprobante); toast.success('Ingreso registrado') }
       else if (modal) { await pagosIngresosApi.actualizar(modal.id, body); toast.success('Ingreso actualizado') }
       setModal(null); load(); invalidateBalanceTesoreria()
     } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
@@ -509,6 +525,11 @@ function IngresosDirectosTab({ canWrite }: { canWrite: boolean }) {
           <option value="">Todas las categorías</option>
           {categorias.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
+        <select className="field__select" style={{ maxWidth: '13rem' }} value={fCuentaBancaria}
+          onChange={e => setFCuentaBancaria(e.target.value === '' ? '' : Number(e.target.value))}>
+          <option value="">Todas las cuentas</option>
+          {cuentasBancarias.data.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
         <Input label="Buscar" placeholder="Concepto…" value={busca} onChange={e => setBusca(e.target.value)} style={{ maxWidth: '16rem' }} />
         <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={load}>Refrescar</Button>
         {canWrite && <Button size="sm" icon={<Plus size={16} />} onClick={abrirNuevo} style={{ marginLeft: 'auto' }}>Nuevo ingreso</Button>}
@@ -521,18 +542,19 @@ function IngresosDirectosTab({ canWrite }: { canWrite: boolean }) {
               <SortTh label="Concepto" sortKey="concepto" sort={sort} onSort={k => setSort(s => toggleSort(s, k))} />
               <SortTh label="Categoría" sortKey="categoria" sort={sort} onSort={k => setSort(s => toggleSort(s, k))} />
               <SortTh label="Fecha" sortKey="fecha" sort={sort} onSort={k => setSort(s => toggleSort(s, k))} />
+              <th>Cuenta bancaria</th>
               <SortTh label="Valor" sortKey="valor" sort={sort} onSort={k => setSort(s => toggleSort(s, k))} align="right" />
               <th>Comprobante</th>{canWrite && <th></th>}
             </tr></thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={canWrite ? 6 : 5} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Cargando…</td></tr>
+                <tr><td colSpan={canWrite ? 7 : 6} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Cargando…</td></tr>
               ) : error ? (
-                <tr><td colSpan={canWrite ? 6 : 5} style={{ textAlign: 'center', padding: '2rem', color: 'var(--rose-600)' }}>
+                <tr><td colSpan={canWrite ? 7 : 6} style={{ textAlign: 'center', padding: '2rem', color: 'var(--rose-600)' }}>
                   {error} · <button onClick={load} style={{ background: 'none', border: 'none', color: 'var(--amber-700)', textDecoration: 'underline', cursor: 'pointer' }}>Reintentar</button>
                 </td></tr>
               ) : visibles.length === 0 ? (
-                <tr><td colSpan={canWrite ? 6 : 5} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Sin ingresos para {MESES[mes - 1]} {anio}.</td></tr>
+                <tr><td colSpan={canWrite ? 7 : 6} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Sin ingresos para {MESES[mes - 1]} {anio}.</td></tr>
               ) : visibles.map(i => {
                 const automatico = i.id_prestamo_fin != null
                 return (
@@ -540,10 +562,11 @@ function IngresosDirectosTab({ canWrite }: { canWrite: boolean }) {
                     <td style={{ fontWeight: 600 }}>{i.concepto} {automatico && <span className="badge badge--info" style={{ marginLeft: '0.3rem', fontSize: '0.65rem' }}>Automático</span>}</td>
                     <td style={{ fontSize: 'var(--fs-sm)' }}>{i.categoria ?? '—'}</td>
                     <td>{formatDate(i.fecha)}</td>
+                    <td style={{ color: 'var(--text-faint)' }}>{i.cuenta_bancaria ?? '—'}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--emerald-700)' }} className="mono">{cop(num(i.valor))}</td>
                     <td>
                       {i.comprobante_url
-                        ? <Button variant="ghost" size="sm" icon={<FileText size={13} />} onClick={() => window.open(i.comprobante_url!, '_blank', 'noopener,noreferrer')} />
+                        ? <Button variant="ghost" size="sm" icon={<FileText size={13} />} onClick={() => abrirUrl(i.comprobante_url)} />
                         : <span style={{ color: 'var(--text-faint)' }}>—</span>}
                     </td>
                     {canWrite && (
@@ -573,7 +596,9 @@ function IngresosDirectosTab({ canWrite }: { canWrite: boolean }) {
             options={categorias.map(c => ({ value: String(c.id), label: c.nombre }))} />
           <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm(s => ({ ...s, fecha: e.target.value }))} />
           <Input label="Valor (COP)" type="number" mono step="1000" required style={{ gridColumn: '1 / -1' }} value={form.valor} onChange={e => setForm(s => ({ ...s, valor: e.target.value }))} />
-          <Input label="Comprobante (URL, opcional)" style={{ gridColumn: '1 / -1' }} placeholder="https://…/comprobante.png" value={form.comprobante_url} onChange={e => setForm(s => ({ ...s, comprobante_url: e.target.value }))} />
+          <ComprobanteInput style={{ gridColumn: '1 / -1' }} value={form.comprobante} existingUrl={modal && modal !== 'nuevo' ? modal.comprobante_url : null}
+            onChange={file => setForm(s => ({ ...s, comprobante: file }))}
+            helper={modal && modal !== 'nuevo' ? 'Editar no reemplaza el comprobante del ingreso.' : undefined} />
         </div>
       </Modal>
 

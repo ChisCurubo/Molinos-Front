@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { ArrowLeft, Calculator, Droplets, Settings2 } from 'lucide-react'
+import { ArrowLeft, Calculator, Droplets, Settings2, Ship } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { Button, Input } from '@/components/ui'
@@ -10,7 +10,7 @@ interface ModuloDef {
   label: string
   sub: string
   icon: typeof Settings2
-  color: 'green' | 'info' | 'amber'
+  color: 'green' | 'info' | 'amber' | 'brown'
   email: string
   to: string
 }
@@ -19,6 +19,7 @@ const MODULOS: ModuloDef[] = [
   { id: 'admin',    label: 'ADMIN',    sub: 'David — Panel completo', icon: Settings2,  color: 'green', email: 'david@molinosdecolombia.com',   to: '/' },
   { id: 'victoria', label: 'VICTORIA', sub: 'Módulo de agua',         icon: Droplets,   color: 'info',  email: 'vicky@molinosdecolombia.com',   to: '/' },
   { id: 'juliana',  label: 'JULIANA',  sub: 'Costos y maquila',       icon: Calculator, color: 'amber', email: 'juliana@molinosdecolombia.com', to: '/' },
+  { id: 'angela',   label: 'ANGELA',   sub: 'Importaciones',          icon: Ship,       color: 'brown', email: 'angela@molinosdecolombia.com',  to: '/' },
 ]
 
 type Mode = 'cards' | 'form'
@@ -35,18 +36,12 @@ export function LoginPage() {
   const [email, setEmail]     = useState('')
   const [password, setPassword] = useState('')
 
-  // ── Card mode: click selecciona módulo y auto-login ──
-  const handleCardSelect = async (m: ModuloDef) => {
+  // ── Card mode: click selecciona el usuario y pasa al formulario para pedir la contraseña ──
+  const handleCardSelect = (m: ModuloDef) => {
     setError('')
-    setLoading(m.id)
-    const res = await login(m.email, 'molinos2026')
-    setLoading(null)
-    if (res.ok) {
-      localStorage.setItem('modulo', m.id)
-      navigate(m.to, { replace: true })
-    } else {
-      setError(res.error ?? 'No fue posible iniciar sesión.')
-    }
+    setEmail(m.email)
+    setPassword('')
+    setMode('form')
   }
 
   // ── Form mode: login con email + contraseña ──
@@ -88,21 +83,18 @@ export function LoginPage() {
           {mode === 'cards' && (
             <>
               <div>
-                <h2 className="auth__heading">Seleccionar módulo</h2>
-                <p className="auth__sub">Haga clic en su área de trabajo.</p>
+                <h2 className="auth__heading">Seleccionar usuario</h2>
+                <p className="auth__sub">Haga clic en su usuario y luego ingrese su contraseña.</p>
               </div>
 
               <div className="auth__modules">
                 {MODULOS.map((m) => {
                   const Icon = m.icon
-                  const busy  = loading === m.id
                   return (
                     <button
                       key={m.id}
-                      className={`auth__mod-card auth__mod-card--${m.color} ${busy ? 'auth__mod-card--loading' : ''}`}
+                      className={`auth__mod-card auth__mod-card--${m.color}`}
                       onClick={() => handleCardSelect(m)}
-                      disabled={isBusy}
-                      aria-busy={busy}
                     >
                       <span className={`auth__mod-icon auth__mod-icon--${m.color}`}>
                         <Icon size={24} aria-hidden="true" />
@@ -111,7 +103,6 @@ export function LoginPage() {
                         <span className="auth__mod-label">{m.label}</span>
                         <span className="auth__mod-sub">{m.sub}</span>
                       </span>
-                      {busy && <span className="auth__mod-spinner" aria-hidden="true" />}
                     </button>
                   )
                 })}
@@ -128,10 +119,6 @@ export function LoginPage() {
               <button className="auth__toggle-btn" onClick={() => { setMode('form'); setError('') }}>
                 Acceder con correo y contraseña →
               </button>
-
-              <p className="auth__hint">
-                Contraseña de acceso: <code>molinos2026</code>
-              </p>
             </>
           )}
 
@@ -148,13 +135,13 @@ export function LoginPage() {
 
               <form className="auth__form" onSubmit={handleFormLogin}>
                 <Input
-                  label="Correo electrónico"
-                  type="email"
+                  label="Usuario"
+                  type="text"
                   placeholder="david@molinosdecolombia.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  autoFocus
+                  autoFocus={!email}
                 />
                 <Input
                   label="Contraseña"
@@ -163,6 +150,7 @@ export function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
+                  autoFocus={!!email}
                 />
 
                 {error && (
@@ -179,12 +167,8 @@ export function LoginPage() {
               <div className="auth__divider">o</div>
 
               <button className="auth__toggle-btn" onClick={() => { setMode('cards'); setError('') }}>
-                ← Acceder por módulo (acceso rápido)
+                ← Seleccionar usuario
               </button>
-
-              <p className="auth__hint">
-                Contraseña de todos: <code>molinos2026</code>
-              </p>
             </>
           )}
 

@@ -13,6 +13,7 @@ export type ModuleKey =
   | 'materiales'
   | 'finanzas'
   | 'nomina'
+  | 'importaciones'
   | 'usuarios'
   | 'powerbi'
   | 'planta'
@@ -31,6 +32,7 @@ const ALL_MODULES: ModuleKey[] = [
   'materiales',
   'finanzas',
   'nomina',
+  'importaciones',
   'usuarios',
   'powerbi',
   'planta',
@@ -54,6 +56,12 @@ export const ROLES: Record<Role, RoleProfile> = {
     descripcion: 'Pagos operativos, cuentas, préstamos, turnos y nómina.',
     modules: ['dashboard', 'finanzas', 'nomina', 'powerbi'],
     canWrite: (m) => m === 'finanzas' || m === 'nomina',
+  },
+  importaciones: {
+    label: 'Importaciones',
+    descripcion: 'Representante legal: importaciones, gastos de puerto, pagos del cliente Transfigura, regalías mineras y adelantos — más acceso completo a Pagos y finanzas (CxP, CxC, nómina).',
+    modules: ['dashboard', 'importaciones', 'finanzas', 'nomina', 'powerbi'],
+    canWrite: (m) => m === 'importaciones' || m === 'finanzas' || m === 'nomina',
   },
 }
 

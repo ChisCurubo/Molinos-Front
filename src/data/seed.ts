@@ -15,11 +15,14 @@ import type {
   Zona,
 } from '@/types'
 
-// Usuarios del sistema. La "contraseña" mock por defecto es: molinos2026
+// Usuarios del sistema, solo para mostrar nombre/rol en el directorio local
+// (Usuarios y accesos). El login real va contra el backend (POST /auth/login);
+// este `password` ya no se usa para autenticar y no debe llevar una contraseña real.
 export const seedUsers: (User & { password: string })[] = [
-  { id: 'u1', nombre: 'David', email: 'david@molinosdecolombia.com', role: 'administrador', activo: true, password: 'molinos2026', ultimoAcceso: '2026-07-07' },
-  { id: 'u2', nombre: 'Vicky', email: 'vicky@molinosdecolombia.com', role: 'materiales', activo: true, password: 'molinos2026', ultimoAcceso: '2026-07-08' },
-  { id: 'u3', nombre: 'Juliana', email: 'juliana@molinosdecolombia.com', role: 'financiero', activo: true, password: 'molinos2026', ultimoAcceso: '2026-07-08' },
+  { id: 'u1', nombre: 'David', email: 'david@molinosdecolombia.com', role: 'administrador', activo: true, password: '', ultimoAcceso: '2026-07-07' },
+  { id: 'u2', nombre: 'Vicky', email: 'vicky@molinosdecolombia.com', role: 'materiales', activo: true, password: '', ultimoAcceso: '2026-07-08' },
+  { id: 'u3', nombre: 'Juliana', email: 'juliana@molinosdecolombia.com', role: 'financiero', activo: true, password: '', ultimoAcceso: '2026-07-08' },
+  { id: 'u4', nombre: 'Angela', email: 'angela@molinosdecolombia.com', role: 'importaciones', activo: true, password: '', ultimoAcceso: '2026-06-29' },
 ]
 
 export const seedZonas: Zona[] = [

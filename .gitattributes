@@ -9,3 +9,7 @@
 *.ico binary
 *.webp binary
 *.svg text eol=lf
+
+# Scripts y config de despliegue: siempre LF (si no, fallan en Linux)
+*.sh text eol=lf
+deploy/Caddyfile.* text eol=lf

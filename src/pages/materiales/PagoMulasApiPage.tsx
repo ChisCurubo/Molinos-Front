@@ -6,6 +6,8 @@ import {
 import { Button, Card, Input, KpiTile, Modal, Select, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
+import { CuentaBancariaSelect } from '@/components/common/CatalogSelectors'
+import { ComprobanteInput } from '@/components/common/ComprobanteInput'
 import { useCanWrite } from '@/hooks/usePermissions'
 import { apiError } from '@/api/client'
 import { materialApi, num, type ViajeDisponibleMula } from '@/api/material'
@@ -16,6 +18,7 @@ import {
   type MulaDespacho, type MulaDetalle, type MulasResumen, type AbonoMula,
   type MetodoPagoMula, type EstadoCuentaPago, type MulaViajeTrazabilidad,
 } from '@/api/pagosMulas'
+import { abrirUrl, urlSegura } from '@/utils/safeUrl'
 
 const cop = formatCOP
 
@@ -60,7 +63,7 @@ function ComprobanteLink({ url }: { url?: string | null }) {
   return (
     <button
       type="button"
-      onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+      onClick={() => abrirUrl(url)}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 4,
         padding: '0.2rem 0.55rem', borderRadius: 999,
@@ -74,8 +77,8 @@ function ComprobanteLink({ url }: { url?: string | null }) {
   )
 }
 
-interface AbonoForm { valor: string; fecha_abono: string; metodo_pago: MetodoPagoMula; comprobante_url: string }
-const emptyAbono = (valor = ''): AbonoForm => ({ valor, fecha_abono: todayISO(), metodo_pago: 'transferencia', comprobante_url: '' })
+interface AbonoForm { valor: string; fecha_abono: string; metodo_pago: MetodoPagoMula; comprobante: File | null; id_cuenta_bancaria: number | '' }
+const emptyAbono = (valor = ''): AbonoForm => ({ valor, fecha_abono: todayISO(), metodo_pago: 'transferencia', comprobante: null, id_cuenta_bancaria: '' })
 
 interface EditAbonoForm extends AbonoForm { observaciones: string }
 const emptyEditAbono = (): EditAbonoForm => ({ ...emptyAbono(), observaciones: '' })
@@ -88,10 +91,11 @@ interface DespachoForm {
   concepto: string
   factura_num: string
   foto_factura_url: string
+  retencion_fuente_manual: string
 }
 const emptyDespacho = (idProveedor: number | '' = ''): DespachoForm => ({
   id_proveedor: idProveedor, valor: '', fecha: todayISO(),
-  id_viaje: '', concepto: '', factura_num: '', foto_factura_url: '',
+  id_viaje: '', concepto: '', factura_num: '', foto_factura_url: '', retencion_fuente_manual: '',
 })
 
 // ── Catálogo de proveedores (fetch local, sin caché compartida: solo esta página lo usa) ──
@@ -296,6 +300,7 @@ export function PagoMulasApiPage() {
       id_viaje: d.id_viaje != null ? String(d.id_viaje) : '',
       concepto: d.concepto ?? '', factura_num: d.factura_num ?? '',
       foto_factura_url: d.foto_factura_url ?? '',
+      retencion_fuente_manual: d.retencion_fuente_manual != null ? String(num(d.retencion_fuente_manual)) : '',
     })
     setDespachoModal(true)
   }
@@ -312,6 +317,7 @@ export function PagoMulasApiPage() {
           foto_factura_url: form.foto_factura_url.trim() || undefined,
           valor: Number(form.valor),
           id_viaje: form.id_viaje ? Number(form.id_viaje) : null,
+          retencion_fuente_manual: form.retencion_fuente_manual === '' ? null : Number(form.retencion_fuente_manual),
         })
         toast.success('Despacho actualizado')
       } else {
@@ -322,6 +328,7 @@ export function PagoMulasApiPage() {
           concepto: form.concepto.trim() || undefined,
           factura_num: form.factura_num.trim() || undefined,
           foto_factura_url: form.foto_factura_url.trim() || undefined,
+          retencion_fuente_manual: form.retencion_fuente_manual === '' ? undefined : Number(form.retencion_fuente_manual),
         })
         toast.success('Despacho registrado')
       }
@@ -371,13 +378,13 @@ export function PagoMulasApiPage() {
     if (!abonoTarget) return
     const valor = Number(abonoForm.valor)
     if (!(valor > 0)) { toast.error('El valor del abono debe ser mayor a 0'); return }
-    if (!abonoForm.comprobante_url.trim()) { toast.error('El comprobante es obligatorio'); return }
     setSavingAbono(true)
     try {
       const res = await pagosMulasApi.crearAbonoProveedor(abonoTarget.id_proveedor, {
-        valor, comprobante_url: abonoForm.comprobante_url.trim(),
+        valor,
         fecha_abono: abonoForm.fecha_abono, metodo_pago: abonoForm.metodo_pago,
-      })
+        id_cuenta_bancaria: abonoForm.metodo_pago === 'efectivo' || abonoForm.id_cuenta_bancaria === '' ? undefined : abonoForm.id_cuenta_bancaria,
+      }, abonoForm.comprobante)
       const nCuentas = res.aplicado_a?.length ?? 0
       const aFavor = num(res.saldo_a_favor_generado)
       toast.success(`Abono aplicado a ${nCuentas} despacho${nCuentas === 1 ? '' : 's'} por ${cop(num(res.total_aplicado) || valor)}${aFavor > 0 ? ` · ${cop(aFavor)} quedó a favor` : ''}`)
@@ -397,7 +404,7 @@ export function PagoMulasApiPage() {
     setEditAbonoForm({
       valor: String(num(a.valor)), fecha_abono: (a.fecha_abono ?? todayISO()).slice(0, 10),
       metodo_pago: (a.metodo_pago as MetodoPagoMula) || 'transferencia',
-      comprobante_url: a.comprobante_url ?? '', observaciones: a.observaciones ?? '',
+      comprobante: null, observaciones: a.observaciones ?? '', id_cuenta_bancaria: '',
     })
   }
   const guardarEditAbono = async () => {
@@ -408,9 +415,8 @@ export function PagoMulasApiPage() {
     try {
       await pagosMulasApi.editarAbono(editAbono.id, {
         valor, fecha_abono: editAbonoForm.fecha_abono, metodo_pago: editAbonoForm.metodo_pago,
-        comprobante_url: editAbonoForm.comprobante_url.trim() || undefined,
         observaciones: editAbonoForm.observaciones.trim() || undefined,
-      })
+      }, editAbonoForm.comprobante)
       toast.success('Abono actualizado')
       setEditAbono(null); await reloadDetalle(); refreshAll(); invalidateAbonos()
     } catch (e) { toast.error(apiError(e).message) } finally { setSavingEditAbono(false) }
@@ -557,7 +563,7 @@ export function PagoMulasApiPage() {
                                 </td>
                                 <td>
                                   {d.factura_num && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-xs)' }}>{d.factura_num} </span>}
-                                  {d.foto_factura_url && <a href={d.foto_factura_url} target="_blank" rel="noreferrer" title="Ver factura" style={{ color: 'var(--amber-700)' }}><ImageIcon size={13} style={{ verticalAlign: 'middle' }} /></a>}
+                                  {d.foto_factura_url && <a href={urlSegura(d.foto_factura_url) ?? undefined} target="_blank" rel="noopener noreferrer" title="Ver factura" style={{ color: 'var(--amber-700)' }}><ImageIcon size={13} style={{ verticalAlign: 'middle' }} /></a>}
                                   {!d.factura_num && !d.foto_factura_url && <span style={{ color: 'var(--text-faint)' }}>—</span>}
                                 </td>
                                 <td style={{ textAlign: 'right' }} className="mono">{cop(num(d.valor))}</td>
@@ -674,6 +680,9 @@ export function PagoMulasApiPage() {
             currentLabel={editDespacho?.numero_viaje != null ? `Viaje ${editDespacho.numero_viaje} (vinculado actualmente)` : undefined}
           />
           <Input label="Foto de factura (URL, opcional)" placeholder="https://…/factura.png" value={form.foto_factura_url} onChange={e => f('foto_factura_url', e.target.value)} />
+          <Input label="Retención manual (opcional)" type="number" mono step="1" placeholder="Auto: 1% transporte de carga"
+            value={form.retencion_fuente_manual} onChange={e => f('retencion_fuente_manual', e.target.value)}
+            helper="Vacío = se calcula sola. 0 = fuerza que no aplique. Cualquier otro valor la reemplaza." />
         </div>
       </Modal>
 
@@ -685,7 +694,7 @@ export function PagoMulasApiPage() {
         onClose={() => setAbonoTarget(null)}
         footer={<>
           <Button variant="secondary" onClick={() => setAbonoTarget(null)}>Cancelar</Button>
-          <Button icon={<Banknote size={16} />} onClick={guardarAbono} disabled={savingAbono || !(Number(abonoForm.valor) > 0) || !abonoForm.comprobante_url.trim()}>
+          <Button icon={<Banknote size={16} />} onClick={guardarAbono} disabled={savingAbono || !(Number(abonoForm.valor) > 0)}>
             {savingAbono ? 'Guardando…' : 'Registrar abono'}
           </Button>
         </>}>
@@ -704,8 +713,10 @@ export function PagoMulasApiPage() {
             value={abonoForm.fecha_abono} onChange={e => setAbonoForm(s => ({ ...s, fecha_abono: e.target.value }))} />
           <Select label="Método de pago" options={METODO_OPTS}
             value={abonoForm.metodo_pago} onChange={e => setAbonoForm(s => ({ ...s, metodo_pago: e.target.value as MetodoPagoMula }))} />
-          <Input label="Comprobante (URL)" required placeholder="https://…/comprobante.png"
-            value={abonoForm.comprobante_url} onChange={e => setAbonoForm(s => ({ ...s, comprobante_url: e.target.value }))} />
+          {abonoForm.metodo_pago !== 'efectivo' && (
+            <CuentaBancariaSelect value={abonoForm.id_cuenta_bancaria} onChange={id => setAbonoForm(s => ({ ...s, id_cuenta_bancaria: id }))} />
+          )}
+          <ComprobanteInput value={abonoForm.comprobante} onChange={file => setAbonoForm(s => ({ ...s, comprobante: file }))} />
         </div>
       </Modal>
 
@@ -722,7 +733,7 @@ export function PagoMulasApiPage() {
             value={editAbonoForm.fecha_abono} onChange={e => setEditAbonoForm(s => ({ ...s, fecha_abono: e.target.value }))} />
           <Select label="Método de pago" options={METODO_OPTS}
             value={editAbonoForm.metodo_pago} onChange={e => setEditAbonoForm(s => ({ ...s, metodo_pago: e.target.value as MetodoPagoMula }))} />
-          <Input label="Comprobante (URL)" value={editAbonoForm.comprobante_url} onChange={e => setEditAbonoForm(s => ({ ...s, comprobante_url: e.target.value }))} />
+          <ComprobanteInput value={editAbonoForm.comprobante} existingUrl={editAbono?.comprobante_url} onChange={file => setEditAbonoForm(s => ({ ...s, comprobante: file }))} />
           <Input label="Observaciones" value={editAbonoForm.observaciones} onChange={e => setEditAbonoForm(s => ({ ...s, observaciones: e.target.value }))} />
         </div>
       </Modal>

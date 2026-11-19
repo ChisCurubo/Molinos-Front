@@ -75,7 +75,7 @@ export function ProveedoresApiPage() {
 // ════════════════════════════════════════════════════════════════════════════
 // PROVEEDORES
 // ════════════════════════════════════════════════════════════════════════════
-const emptyProveedorForm = () => ({ nombre: '', id_categoria: '' as number | '', tipo: 'general' as TipoProveedor, alias: '', contacto: '', telefono: '', ciudad: '', compra_realizada: '', nequi: false, estado: 'activo' })
+const emptyProveedorForm = () => ({ nombre: '', id_categoria: '' as number | '', tipo: 'general' as TipoProveedor, alias: '', contacto: '', telefono: '', ciudad: '', compra_realizada: '', nequi: false, estado: 'activo', declarante_renta: false, exento_retencion: false })
 
 function ProveedoresTab({ canWrite, categorias }: { canWrite: boolean; categorias: ReturnType<typeof useCategoriasProveedor> }) {
   const toast = useToast()
@@ -100,6 +100,7 @@ function ProveedoresTab({ canWrite, categorias }: { canWrite: boolean; categoria
       nombre: p.nombre, id_categoria: p.id_categoria ?? '', tipo: p.tipo ?? 'general', alias: p.alias ?? '', contacto: p.contacto ?? '',
       telefono: p.telefono ?? '', ciudad: p.ciudad ?? '', compra_realizada: p.compra_realizada ?? '',
       nequi: !!num(p.nequi), estado: p.estado ?? 'activo',
+      declarante_renta: !!num(p.declarante_renta), exento_retencion: !!num(p.exento_retencion),
     })
     setModal(p.id)
   }
@@ -112,6 +113,7 @@ function ProveedoresTab({ canWrite, categorias }: { canWrite: boolean; categoria
       alias: form.alias.trim() || undefined, contacto: form.contacto.trim() || undefined,
       telefono: form.telefono.trim() || undefined, ciudad: form.ciudad.trim() || undefined,
       compra_realizada: form.compra_realizada.trim() || undefined, nequi: form.nequi, estado: form.estado,
+      declarante_renta: form.declarante_renta, exento_retencion: form.exento_retencion,
     }
     try {
       if (modal === 'nuevo') { await pagosApi.createProveedor(body); toast.success('Proveedor creado') }
@@ -182,6 +184,8 @@ function ProveedoresTab({ canWrite, categorias }: { canWrite: boolean; categoria
                       <span className={`badge ${p.tipo && p.tipo !== 'general' ? 'badge--info' : 'badge--neutral'}`} style={{ fontSize: '0.65rem' }}>{TIPO_PROVEEDOR_LABEL(p.tipo)}</span>
                       {p.categoria && <span className="badge badge--neutral" style={{ fontSize: '0.65rem' }}>{p.categoria}</span>}
                       {!!num(p.nequi) && <span className="badge badge--info" style={{ fontSize: '0.65rem' }}>Nequi</span>}
+                      {!!num(p.declarante_renta) && <span className="badge badge--neutral" style={{ fontSize: '0.65rem' }}>Declarante</span>}
+                      {!!num(p.exento_retencion) && <span className="badge badge--success" style={{ fontSize: '0.65rem' }} title="No se le aplica retefuente ni reteIVA">Exento retención</span>}
                     </div>
                     {p.alias && p.alias !== p.nombre && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-faint)', marginTop: '0.15rem' }}>Alias: {p.alias}</div>}
                     {p.compra_realizada && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-faint)' }}>{p.compra_realizada}</div>}
@@ -229,6 +233,18 @@ function ProveedoresTab({ canWrite, categorias }: { canWrite: boolean; categoria
             <Select label="Estado" value={form.estado} onChange={e => f('estado', e.target.value)}
               options={[{ value: 'activo', label: 'Activo' }, { value: 'inactivo', label: 'Inactivo' }]} />
           )}
+          <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)', marginTop: '0.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input type="checkbox" id="proveedor-declarante" checked={form.declarante_renta} onChange={e => f('declarante_renta', e.target.checked)} />
+              <label htmlFor="proveedor-declarante" style={{ cursor: 'pointer', userSelect: 'none' }}>Declarante de renta</label>
+              <span className="field__helper" style={{ margin: 0 }}>Cambia la tarifa de retefuente que se le aplica (ver Impuestos → Retenciones).</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input type="checkbox" id="proveedor-exento" checked={form.exento_retencion} onChange={e => f('exento_retencion', e.target.checked)} />
+              <label htmlFor="proveedor-exento" style={{ cursor: 'pointer', userSelect: 'none' }}>Exento de retención</label>
+              <span className="field__helper" style={{ margin: 0 }}>Bloquea TANTO retefuente como reteIVA para este proveedor.</span>
+            </div>
+          </div>
         </div>
       </Modal>
 

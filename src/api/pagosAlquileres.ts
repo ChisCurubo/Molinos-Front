@@ -12,7 +12,7 @@
 // historial propio (PATCH/DELETE por abono) — no hace falta localStorage.
 // ════════════════════════════════════════════════════════════════════════════
 
-import { apiFetch, apiPost, apiPut, apiPatch, apiDelete } from './client'
+import { apiFetch, apiPost, apiPut, apiDelete, apiPostComprobante, apiPatchComprobante } from './client'
 
 type Dec = number | string | null
 
@@ -44,6 +44,14 @@ export interface Alquiler {
   // se creó suelto, sin contrato). Shape de id_contrato/contrato sin confirmar.
   id_contrato?: number | null
   contrato?: string | null
+  // ✅ Confirmado en vivo (2026-10-31): el backend ya trae estos tres campos
+  // en cada fila de /pagos/alquileres. ReteFuente (4% arrendamiento) y
+  // ReteIVA (15%) se calculan solos según el tipo/proveedor al crear la
+  // cuenta — valor_iva es el IVA de la factura que el usuario declara (no se
+  // calcula solo). Los *_manual fuerzan el valor (0 = no aplica).
+  valor_iva?: Dec
+  retencion_fuente_manual?: Dec
+  reteiva_manual?: Dec
 }
 
 export interface AlquilerPayload {
@@ -52,6 +60,9 @@ export interface AlquilerPayload {
   id_proveedor?: number
   fecha_inicio: string
   valor: number
+  valor_iva?: number
+  retencion_fuente_manual?: number | null
+  reteiva_manual?: number | null
 }
 
 export interface AlquileresFiltro {
@@ -119,12 +130,11 @@ export interface AbonoAlquiler {
 
 export interface AbonoAlquilerPayload {
   valor: number
-  // El backend lo exige siempre — 400 "Cada abono requiere el comprobante
-  // (comprobante_url)" si se omite (confirmado en vivo, no es opcional).
-  comprobante_url: string
   fecha?: string
   metodo_pago?: string
   observaciones?: string
+  // Si se manda y la cuenta no está exenta, el backend cobra el 4×1000 solo.
+  id_cuenta_bancaria?: number
 }
 
 export interface EstadoPagoAlquiler {
@@ -133,6 +143,8 @@ export interface EstadoPagoAlquiler {
   estado: EstadoAlquiler
   valor_total: Dec
   valor_pagado: Dec
+  valor_retenido: Dec
+  valor_iva: Dec
   saldo: Dec
   abonos: AbonoAlquiler[]
 }
@@ -182,13 +194,15 @@ export const pagosAlquileresApi = {
 
   // Pago (estado + abonos de UN alquiler — la cuenta por pagar nace sola al pedirlo)
   getEstadoPago: (id: number) => apiFetch<EstadoPagoAlquiler>(`/pagos/alquileres/${id}/estado-pago`),
-  crearAbono: (id: number, body: AbonoAlquilerPayload) => apiPost<AbonoAlquiler>(`/pagos/alquileres/${id}/abonos`, body),
+  crearAbono: (id: number, body: AbonoAlquilerPayload, comprobante?: File | null) =>
+    apiPostComprobante<AbonoAlquiler>(`/pagos/alquileres/${id}/abonos`, body, comprobante),
   listarAbonos: (filtro?: AbonosAlquilerFiltro) =>
     apiFetch<AbonoAlquiler[]>(`/pagos/alquileres/abonos${qs({
       id_alquiler: filtro?.id_alquiler, desde: filtro?.desde, hasta: filtro?.hasta,
       metodo_pago: filtro?.metodo_pago, page: filtro?.page, limit: filtro?.limit,
     })}`),
-  corregirAbono: (idAbono: number, body: Partial<AbonoAlquilerPayload>) => apiPatch<AbonoAlquiler>(`/pagos/alquileres/abonos/${idAbono}`, body),
+  corregirAbono: (idAbono: number, body: Partial<AbonoAlquilerPayload>, comprobante?: File | null) =>
+    apiPatchComprobante<AbonoAlquiler>(`/pagos/alquileres/abonos/${idAbono}`, body, comprobante),
   eliminarAbono: (idAbono: number) => apiDelete<{ message?: string }>(`/pagos/alquileres/abonos/${idAbono}`),
 
   // Contratos (gasto recurrente — genera los meses automáticamente)

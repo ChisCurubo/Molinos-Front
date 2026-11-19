@@ -1,20 +1,19 @@
-// Única fuente de verdad de la sesión en localStorage.
-// Solo se guarda la sesión (usuario + token); el token NO se duplica en otra clave.
+// Perfil de sesión en localStorage (solo usuario/rol para pintar la UI).
+// El token JWT ya NO se guarda aquí: viaja en una cookie httpOnly puesta por el backend,
+// que el JavaScript de la página no puede leer. Los permisos reales los valida el backend.
 export const SESSION_KEY = 'molinos_erp_session_v1'
-
-/** Lee el token JWT desde la sesión persistida (o null si no hay sesión). */
-export function getStoredToken(): string | null {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as { token?: string } | null
-    return parsed?.token ?? null
-  } catch {
-    return null
-  }
-}
 
 /** Borra la sesión de localStorage (logout duro). */
 export function clearSession(): void {
   localStorage.removeItem(SESSION_KEY)
+}
+
+const KEEP_KEYS = ['molinos_erp_a11y_v1'] // preferencias de accesibilidad, no son datos de negocio
+
+/** Borra sesión y todos los datos de negocio guardados en el navegador (logout / sesión vencida). */
+export function clearLocalData(): void {
+  try {
+    Object.keys(localStorage).filter((k) => !KEEP_KEYS.includes(k)).forEach((k) => localStorage.removeItem(k))
+    sessionStorage.clear()
+  } catch { /* storage no disponible */ }
 }

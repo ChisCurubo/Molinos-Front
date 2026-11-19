@@ -31,6 +31,10 @@ export interface Proveedor {
   nequi?: boolean | number
   compra_realizada?: string | null
   estado?: 'activo' | 'inactivo' | string
+  // Declarante de renta (afecta la tarifa de retefuente aplicada) y exención
+  // total de retención (bloquea retefuente Y reteiva — ver ImpuestosApiPage).
+  declarante_renta?: boolean | number
+  exento_retencion?: boolean | number
 }
 export interface ProveedorPayload {
   nombre: string
@@ -43,6 +47,8 @@ export interface ProveedorPayload {
   nequi?: boolean
   compra_realizada?: string
   estado?: string
+  declarante_renta?: boolean
+  exento_retencion?: boolean
 }
 export interface ProveedoresFiltro {
   id_categoria?: number

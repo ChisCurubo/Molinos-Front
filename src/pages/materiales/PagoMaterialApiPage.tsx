@@ -5,9 +5,11 @@ import {
 } from 'lucide-react'
 import { Button, Card, Input, KpiTile, Modal, Select, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
-import { MineroSelect } from '@/components/common/CatalogSelectors'
+import { MineroSelect, CuentaBancariaSelect } from '@/components/common/CatalogSelectors'
+import { ComprobanteInput } from '@/components/common/ComprobanteInput'
 import { useCanWrite } from '@/hooks/usePermissions'
 import { apiError } from '@/api/client'
+import { invalidateEntradas } from '@/hooks/useEntradas'
 import { formatCOP, formatDate, todayISO } from '@/utils/format'
 import { materialApi, num, type EntradaRow, type EntradaDetalle } from '@/api/material'
 import {
@@ -15,6 +17,7 @@ import {
   type CuentaMaterialRow, type CuentaMaterialDetalle, type CuentaVolqueta, type AnalisisVolqueta,
   type AbonoCxP, type EstadoCxP, type MetodoPago,
 } from '@/api/pagosMaterial'
+import { abrirUrl } from '@/utils/safeUrl'
 
 const cop = formatCOP
 
@@ -51,8 +54,8 @@ const metodoPrecioLabel = (m?: string | null) =>
   m === 'por_tonelada' ? 'Por tonelada ($/t)' : m === 'por_gramo' ? 'Por gramo ($/g)' : (m ?? '—')
 
 // ── Estado de formularios ─────────────────────────────────────────────────────
-interface AbonoForm { valor: string; fecha_abono: string; metodo_pago: MetodoPago; comprobante_url: string; observaciones: string }
-const emptyAbono = (): AbonoForm => ({ valor: '', fecha_abono: todayISO(), metodo_pago: 'transferencia', comprobante_url: '', observaciones: '' })
+interface AbonoForm { valor: string; fecha_abono: string; metodo_pago: MetodoPago; comprobante: File | null; observaciones: string; id_cuenta_bancaria: number | '' }
+const emptyAbono = (): AbonoForm => ({ valor: '', fecha_abono: todayISO(), metodo_pago: 'transferencia', comprobante: null, observaciones: '', id_cuenta_bancaria: '' })
 
 interface CuentaForm { concepto: string; fecha_limite: string }
 
@@ -174,7 +177,7 @@ export function PagoMaterialApiPage() {
         fecha_limite: nuevaForm.fecha_limite || undefined,
       })
       toast.success('Cuenta de pago creada')
-      setNuevaOpen(false); load()
+      setNuevaOpen(false); load(); invalidateEntradas()
     } catch (e) { toast.error(apiError(e).message) } finally { setSavingCuenta(false) }
   }
 
@@ -188,32 +191,32 @@ export function PagoMaterialApiPage() {
     setAbonoForm({
       valor: String(num(a.valor)), fecha_abono: (a.fecha_abono ?? todayISO()).slice(0, 10),
       metodo_pago: (a.metodo_pago as MetodoPago) || 'transferencia',
-      comprobante_url: a.comprobante_url ?? '', observaciones: a.observaciones ?? '',
+      comprobante: null, observaciones: a.observaciones ?? '', id_cuenta_bancaria: '',
     })
   }
   const guardarAbono = async () => {
     if (abonoCuenta == null) return
     const valor = Number(abonoForm.valor)
     if (!(valor > 0)) { toast.error('El valor del abono debe ser mayor a 0'); return }
-    if (!abonoForm.comprobante_url.trim()) { toast.error('El comprobante es obligatorio'); return }
     setSavingAbono(true)
     try {
+      const id_cuenta_bancaria = abonoForm.metodo_pago === 'efectivo' || abonoForm.id_cuenta_bancaria === '' ? undefined : abonoForm.id_cuenta_bancaria
       if (abonoEdit) {
         await pagosMaterialApi.editarAbono(abonoEdit.id, {
-          valor, fecha_abono: abonoForm.fecha_abono, metodo_pago: abonoForm.metodo_pago,
-          comprobante_url: abonoForm.comprobante_url.trim(), observaciones: abonoForm.observaciones.trim() || undefined,
-        })
+          valor, fecha_abono: abonoForm.fecha_abono, metodo_pago: abonoForm.metodo_pago, id_cuenta_bancaria,
+          observaciones: abonoForm.observaciones.trim() || undefined,
+        }, abonoForm.comprobante)
         toast.success('Abono actualizado')
       } else {
         await pagosMaterialApi.crearAbono(abonoCuenta, {
-          valor, fecha_abono: abonoForm.fecha_abono, metodo_pago: abonoForm.metodo_pago,
-          comprobante_url: abonoForm.comprobante_url.trim(), observaciones: abonoForm.observaciones.trim() || undefined,
-        })
+          valor, fecha_abono: abonoForm.fecha_abono, metodo_pago: abonoForm.metodo_pago, id_cuenta_bancaria,
+          observaciones: abonoForm.observaciones.trim() || undefined,
+        }, abonoForm.comprobante)
         toast.success('Abono registrado')
       }
       const id = abonoCuenta
       setAbonoCuenta(null)
-      await reloadDetalle(id); load()
+      await reloadDetalle(id); load(); invalidateEntradas()
     } catch (e) { toast.error(apiError(e).message) } finally { setSavingAbono(false) }
   }
   const eliminarAbono = async (idCuenta: number, idAbono: number) => {
@@ -221,7 +224,7 @@ export function PagoMaterialApiPage() {
     try {
       await pagosMaterialApi.eliminarAbono(idAbono)
       toast.success('Abono eliminado')
-      await reloadDetalle(idCuenta); load()
+      await reloadDetalle(idCuenta); load(); invalidateEntradas()
     } catch (e) { toast.error(apiError(e).message) }
   }
 
@@ -242,7 +245,7 @@ export function PagoMaterialApiPage() {
       toast.success('Cuenta actualizada')
       const id = editCuenta.id
       setEditCuenta(null)
-      await reloadDetalle(id); load()
+      await reloadDetalle(id); load(); invalidateEntradas()
     } catch (e) { toast.error(apiError(e).message) } finally { setSavingEdit(false) }
   }
   const anularCuenta = async (c: CuentaMaterialRow) => {
@@ -250,7 +253,7 @@ export function PagoMaterialApiPage() {
     try {
       await pagosMaterialApi.anularCuenta(c.id)
       toast.success('Cuenta anulada')
-      load()
+      load(); invalidateEntradas()
     } catch (e) { toast.error(apiError(e).message) }
   }
 
@@ -522,7 +525,7 @@ export function PagoMaterialApiPage() {
                                   <td style={{ textAlign: 'right', fontWeight: 700, color: '#15803d' }} className="mono">{cop(num(a.valor))}</td>
                                   <td style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>{a.observaciones || '—'}</td>
                                   <td style={{ textAlign: 'center' }}>{a.comprobante_url
-                                    ? <Button variant="ghost" size="sm" icon={<FileText size={13} />} title="Abrir comprobante" onClick={() => window.open(a.comprobante_url!, '_blank', 'noopener,noreferrer')} />
+                                    ? <Button variant="ghost" size="sm" icon={<FileText size={13} />} title="Abrir comprobante" onClick={() => abrirUrl(a.comprobante_url)} />
                                     : <span style={{ color: 'var(--text-faint)' }}>—</span>}</td>
                                   {canWrite && (
                                     <td>
@@ -621,7 +624,7 @@ export function PagoMaterialApiPage() {
             onClose={() => setAbonoCuenta(null)}
             footer={<>
               <Button variant="secondary" onClick={() => setAbonoCuenta(null)}>Cancelar</Button>
-              <Button icon={<Banknote size={16} />} onClick={guardarAbono} disabled={savingAbono || !(valorNum > 0) || !abonoForm.comprobante_url.trim()}>
+              <Button icon={<Banknote size={16} />} onClick={guardarAbono} disabled={savingAbono || !(valorNum > 0)}>
                 {savingAbono ? 'Guardando…' : abonoEdit ? 'Guardar cambios' : 'Registrar abono'}
               </Button>
             </>}>
@@ -638,9 +641,12 @@ export function PagoMaterialApiPage() {
                 value={abonoForm.fecha_abono} onChange={e => setAbonoForm(f => ({ ...f, fecha_abono: e.target.value }))} />
               <Select label="Método de pago" options={METODO_OPTS}
                 value={abonoForm.metodo_pago} onChange={e => setAbonoForm(f => ({ ...f, metodo_pago: e.target.value as MetodoPago }))} />
-              <Input label="Comprobante (URL)" required placeholder="https://…/comprobante.png"
-                value={abonoForm.comprobante_url} onChange={e => setAbonoForm(f => ({ ...f, comprobante_url: e.target.value }))}
-                helper="Obligatorio: enlace al soporte de la transferencia." />
+              {abonoForm.metodo_pago !== 'efectivo' && (
+                <CuentaBancariaSelect value={abonoForm.id_cuenta_bancaria} onChange={id => setAbonoForm(f => ({ ...f, id_cuenta_bancaria: id }))} />
+              )}
+              <ComprobanteInput value={abonoForm.comprobante} existingUrl={abonoEdit?.comprobante_url}
+                onChange={file => setAbonoForm(f => ({ ...f, comprobante: file }))}
+                helper="Foto o PDF del soporte de la transferencia (opcional)." />
               <Input label="Observaciones (opcional)" placeholder="Abono parcial"
                 value={abonoForm.observaciones} onChange={e => setAbonoForm(f => ({ ...f, observaciones: e.target.value }))} />
             </div>

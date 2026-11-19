@@ -73,6 +73,10 @@ export interface LibroGastoItem {
   metodo_pago: string
   comprobante_url?: string | null
   observaciones?: string | null
+  // Cuenta bancaria desde la que salió el pago (si se asoció una) — nombre ya
+  // resuelto por el backend, igual que en /pagos/impuestos/aplicados.
+  id_cuenta_bancaria?: number | null
+  cuenta_bancaria?: string | null
 }
 
 export interface CrearCxpPayload {
@@ -110,8 +114,8 @@ export const pagosCxpApi = {
     apiPost<CxpCuenta>(`/pagos/cxp/${id}/pagar`, { pagoAdicional }),
 
   // Libro de gastos: ledger transaccional (no agregado) de todos los módulos.
-  getLibroGastos: (mes?: number, anio?: number) =>
-    apiFetch<LibroGastoItem[]>(`/pagos/vistas/libro-gastos${qs({ mes, anio })}`),
+  getLibroGastos: (mes?: number, anio?: number, id_cuenta_bancaria?: number) =>
+    apiFetch<LibroGastoItem[]>(`/pagos/vistas/libro-gastos${qs({ mes, anio, id_cuenta_bancaria })}`),
 
   // Categorías (catálogo compartido por todos los módulos de pago).
   getCategorias: () => apiFetch<CategoriaCxp[]>('/pagos/cxp/categorias'),

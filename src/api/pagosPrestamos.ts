@@ -11,7 +11,7 @@
 // actividad: abonos o interés capitalizado).
 // ════════════════════════════════════════════════════════════════════════════
 
-import { apiFetch, apiPost, apiPut, apiPatch, apiDelete } from './client'
+import { apiFetch, apiPost, apiPut, apiPatch, apiDelete, apiPostComprobante } from './client'
 
 type Dec = number | string | null
 
@@ -50,8 +50,9 @@ export interface AbonoPrestamoPayload {
   valor: number
   fecha_abono?: string
   metodo_pago?: string
-  comprobante_url?: string
   observaciones?: string
+  // Si se manda y la cuenta no está exenta, el backend cobra el 4×1000 solo.
+  id_cuenta_bancaria?: number
 }
 
 export interface ProyeccionInteresPrestamo {
@@ -72,7 +73,8 @@ export const pagosPrestamosApi = {
   eliminar: (id: number) => apiDelete<{ message?: string }>(`/pagos/prestamos-financieros/${id}`),
 
   // Abono real (pago de cuota) — 409 si valor > saldo pendiente.
-  abonar: (id: number, body: AbonoPrestamoPayload) => apiPost<MovimientoPrestamo>(`/pagos/prestamos-financieros/${id}/abonos`, body),
+  abonar: (id: number, body: AbonoPrestamoPayload, comprobante?: File | null) =>
+    apiPostComprobante<MovimientoPrestamo>(`/pagos/prestamos-financieros/${id}/abonos`, body, comprobante),
   // Solo consulta, no persiste — mostrar antes de capitalizar para que el
   // usuario vea cuántos meses hay acumulados y no se entere por el 409.
   getProyeccionInteres: (id: number, fecha?: string) =>

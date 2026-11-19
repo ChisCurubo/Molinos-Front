@@ -3,6 +3,8 @@ import { AlertTriangle, CircleDollarSign, Plus, RefreshCw, Trash2 } from 'lucide
 import { Button, Card, Input, KpiTile, Modal, Select, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
+import { CuentaBancariaSelect } from '@/components/common/CatalogSelectors'
+import { ComprobanteInput } from '@/components/common/ComprobanteInput'
 import { useCanWrite } from '@/hooks/usePermissions'
 import { apiError } from '@/api/client'
 import { num } from '@/api/material'
@@ -75,13 +77,14 @@ function useTerceros() {
 interface NuevoForm {
   id: number | ''
   monto: string
-  comprobante_url: string
+  comprobante: File | null
   fecha: string
   metodo_pago: string
   descripcion: string
   observaciones: string
+  id_cuenta_bancaria: number | ''
 }
-const emptyNuevo = (): NuevoForm => ({ id: '', monto: '', comprobante_url: '', fecha: todayISO(), metodo_pago: 'efectivo', descripcion: '', observaciones: '' })
+const emptyNuevo = (): NuevoForm => ({ id: '', monto: '', comprobante: null, fecha: todayISO(), metodo_pago: 'efectivo', descripcion: '', observaciones: '', id_cuenta_bancaria: '' })
 
 export function AnticiposApiPage() {
   const canWrite = useCanWrite('finanzas')
@@ -124,16 +127,16 @@ export function AnticiposApiPage() {
   const guardar = async () => {
     if (form.id === '') { toast.error('Selecciona el proveedor'); return }
     if (!(Number(form.monto) > 0)) { toast.error('El monto debe ser mayor a 0'); return }
-    if (!form.comprobante_url.trim()) { toast.error('El comprobante es obligatorio'); return }
     setSaving(true)
     try {
       await pagosAnticiposApi.crear({
         tercero: 'proveedor', id: Number(form.id), monto: Number(form.monto),
-        comprobante_url: form.comprobante_url.trim(), fecha: form.fecha || undefined,
+        fecha: form.fecha || undefined,
         metodo_pago: form.metodo_pago || undefined,
         descripcion: form.descripcion.trim() || undefined,
         observaciones: form.observaciones.trim() || undefined,
-      })
+        id_cuenta_bancaria: form.metodo_pago === 'efectivo' || form.id_cuenta_bancaria === '' ? undefined : form.id_cuenta_bancaria,
+      }, form.comprobante)
       toast.success('Anticipo registrado'); setNuevoModal(false); load()
     } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
   }
@@ -269,7 +272,7 @@ export function AnticiposApiPage() {
       <Modal open={nuevoModal} title="Nuevo anticipo a proveedor" onClose={() => setNuevoModal(false)}
         footer={<>
           <Button variant="secondary" onClick={() => setNuevoModal(false)}>Cancelar</Button>
-          <Button onClick={guardar} disabled={saving || form.id === '' || !(Number(form.monto) > 0) || !form.comprobante_url.trim()}>{saving ? 'Guardando…' : 'Registrar anticipo'}</Button>
+          <Button onClick={guardar} disabled={saving || form.id === '' || !(Number(form.monto) > 0)}>{saving ? 'Guardando…' : 'Registrar anticipo'}</Button>
         </>}>
         <div className="grid grid--form">
           <Select label="Proveedor" required value={form.id === '' ? '' : String(form.id)}
@@ -280,7 +283,10 @@ export function AnticiposApiPage() {
           <Input label="Monto" type="number" mono step="1000" required value={form.monto} onChange={e => setForm(s => ({ ...s, monto: e.target.value }))} />
           <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm(s => ({ ...s, fecha: e.target.value }))} />
           <Select label="Método de pago" options={METODO_OPTS} value={form.metodo_pago} onChange={e => setForm(s => ({ ...s, metodo_pago: e.target.value }))} />
-          <Input label="Comprobante (URL)" required placeholder="https://…/comprobante.png" value={form.comprobante_url} onChange={e => setForm(s => ({ ...s, comprobante_url: e.target.value }))} />
+          {form.metodo_pago !== 'efectivo' && (
+            <CuentaBancariaSelect value={form.id_cuenta_bancaria} onChange={id => setForm(s => ({ ...s, id_cuenta_bancaria: id }))} />
+          )}
+          <ComprobanteInput style={{ gridColumn: '1 / -1' }} value={form.comprobante} onChange={file => setForm(s => ({ ...s, comprobante: file }))} />
           <Input label="Descripción (opcional)" style={{ gridColumn: '1 / -1' }} value={form.descripcion} onChange={e => setForm(s => ({ ...s, descripcion: e.target.value }))} />
           <Input label="Observaciones (opcional)" style={{ gridColumn: '1 / -1' }} value={form.observaciones} onChange={e => setForm(s => ({ ...s, observaciones: e.target.value }))} />
         </div>

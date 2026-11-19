@@ -10,7 +10,7 @@ interface ProtectedRouteProps {
 
 /** Exige sesión activa y permiso de vista para el módulo. */
 export function ProtectedRoute({ module, children }: ProtectedRouteProps) {
-  const { user, initializing } = useAuth()
+  const { user, initializing, mustChangePassword } = useAuth()
   const location = useLocation()
 
   // Aún validando el token persistido contra el backend: no mostramos el sistema
@@ -20,6 +20,9 @@ export function ProtectedRoute({ module, children }: ProtectedRouteProps) {
   }
   if (!user) {
     return <Navigate to="/login" replace state={{ from: location }} />
+  }
+  if (mustChangePassword) {
+    return <Navigate to="/cambiar-password" replace />
   }
   if (!canView(user.role, module)) {
     return <Navigate to="/sin-acceso" replace />

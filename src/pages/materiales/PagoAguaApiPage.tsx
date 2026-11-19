@@ -4,7 +4,8 @@ import {
   Pencil, RefreshCw, Trash2,
 } from 'lucide-react'
 import { Button, Card, Input, KpiTile, Modal, Select, useToast } from '@/components/ui'
-import { DuenoSelect } from '@/components/common/CatalogSelectors'
+import { DuenoSelect, CuentaBancariaSelect } from '@/components/common/CatalogSelectors'
+import { ComprobanteInput } from '@/components/common/ComprobanteInput'
 import { useCanWrite } from '@/hooks/usePermissions'
 import { apiError } from '@/api/client'
 import { num } from '@/api/material'
@@ -14,6 +15,7 @@ import {
   type DuenoAguaResumen, type AguaDuenoDetalle, type AguaCuentaMes, type AguaRegistroPago,
   type AbonoPagoAgua, type MetodoPagoAgua, type HistorialAguaResponse,
 } from '@/api/pagosAgua'
+import { abrirUrl } from '@/utils/safeUrl'
 
 const cop = formatCOP
 
@@ -38,8 +40,8 @@ const duenoSaldo = (d: DuenoAguaResumen) => num(d.neto_total) - num(d.abonado)
 const registroBruto = (r: AguaRegistroPago) => num(r.bruto) || num(r.valor_viaje) * num(r.cantidad_viajes) || num(r.neto) + num(r.acpm)
 const registroSaldo = (r: AguaRegistroPago) => (r.saldo != null ? num(r.saldo) : num(r.neto) - num(r.pagado))
 
-interface AbonoForm { valor: string; fecha_abono: string; metodo_pago: MetodoPagoAgua; comprobante_url: string; observaciones: string }
-const emptyAbono = (valor = ''): AbonoForm => ({ valor, fecha_abono: todayISO(), metodo_pago: 'transferencia', comprobante_url: '', observaciones: '' })
+interface AbonoForm { valor: string; fecha_abono: string; metodo_pago: MetodoPagoAgua; comprobante: File | null; observaciones: string; id_cuenta_bancaria: number | '' }
+const emptyAbono = (valor = ''): AbonoForm => ({ valor, fecha_abono: todayISO(), metodo_pago: 'transferencia', comprobante: null, observaciones: '', id_cuenta_bancaria: '' })
 
 type PageTab = 'dashboard' | 'historial'
 
@@ -125,9 +127,9 @@ export function PagoAguaTab() {
     try {
       const res = await pagosAguaApi.crearAbono(abonoDueno.id, {
         valor, fecha_abono: abonoForm.fecha_abono, metodo_pago: abonoForm.metodo_pago,
-        comprobante_url: abonoForm.comprobante_url.trim() || undefined,
         observaciones: abonoForm.observaciones.trim() || undefined,
-      })
+        id_cuenta_bancaria: abonoForm.metodo_pago === 'efectivo' || abonoForm.id_cuenta_bancaria === '' ? undefined : abonoForm.id_cuenta_bancaria,
+      }, abonoForm.comprobante)
       const nMeses = res.aplicado_a?.length ?? 0
       const aFavor = num(res.saldo_a_favor_generado)
       toast.success(`Abono aplicado a ${nMeses} cuenta${nMeses === 1 ? '' : 's'} por ${cop(num(res.total_aplicado) || valor)}${aFavor > 0 ? ` · ${cop(aFavor)} quedó a favor` : ''}`)
@@ -148,7 +150,7 @@ export function PagoAguaTab() {
     setEditForm({
       valor: String(num(a.valor)), fecha_abono: (a.fecha_abono ?? todayISO()).slice(0, 10),
       metodo_pago: (a.metodo_pago as MetodoPagoAgua) || 'transferencia',
-      comprobante_url: a.comprobante_url ?? '', observaciones: a.observaciones ?? '',
+      comprobante: null, observaciones: a.observaciones ?? '', id_cuenta_bancaria: '',
     })
   }
   const guardarEditAbono = async () => {
@@ -159,9 +161,8 @@ export function PagoAguaTab() {
     try {
       await pagosAguaApi.editarAbono(editAbono.abono.id, {
         valor, fecha_abono: editForm.fecha_abono, metodo_pago: editForm.metodo_pago,
-        comprobante_url: editForm.comprobante_url.trim() || undefined,
         observaciones: editForm.observaciones.trim() || undefined,
-      })
+      }, editForm.comprobante)
       toast.success('Abono actualizado')
       const id = editAbono.idDueno
       setEditAbono(null)
@@ -304,8 +305,10 @@ export function PagoAguaTab() {
             value={abonoForm.fecha_abono} onChange={e => setAbonoForm(f => ({ ...f, fecha_abono: e.target.value }))} />
           <Select label="Método de pago" options={METODO_OPTS}
             value={abonoForm.metodo_pago} onChange={e => setAbonoForm(f => ({ ...f, metodo_pago: e.target.value as MetodoPagoAgua }))} />
-          <Input label="Comprobante (URL, opcional)" placeholder="https://…/comprobante.png"
-            value={abonoForm.comprobante_url} onChange={e => setAbonoForm(f => ({ ...f, comprobante_url: e.target.value }))} />
+          {abonoForm.metodo_pago !== 'efectivo' && (
+            <CuentaBancariaSelect value={abonoForm.id_cuenta_bancaria} onChange={id => setAbonoForm(f => ({ ...f, id_cuenta_bancaria: id }))} />
+          )}
+          <ComprobanteInput value={abonoForm.comprobante} onChange={file => setAbonoForm(f => ({ ...f, comprobante: file }))} />
           <Input label="Observaciones (opcional)" placeholder="Abono parcial"
             value={abonoForm.observaciones} onChange={e => setAbonoForm(f => ({ ...f, observaciones: e.target.value }))} />
         </div>
@@ -324,8 +327,8 @@ export function PagoAguaTab() {
             value={editForm.fecha_abono} onChange={e => setEditForm(f => ({ ...f, fecha_abono: e.target.value }))} />
           <Select label="Método de pago" options={METODO_OPTS}
             value={editForm.metodo_pago} onChange={e => setEditForm(f => ({ ...f, metodo_pago: e.target.value as MetodoPagoAgua }))} />
-          <Input label="Comprobante (URL)" value={editForm.comprobante_url}
-            onChange={e => setEditForm(f => ({ ...f, comprobante_url: e.target.value }))} />
+          <ComprobanteInput value={editForm.comprobante} existingUrl={editAbono?.abono.comprobante_url}
+            onChange={file => setEditForm(f => ({ ...f, comprobante: file }))} />
           <Input label="Observaciones" value={editForm.observaciones}
             onChange={e => setEditForm(f => ({ ...f, observaciones: e.target.value }))} />
         </div>
@@ -397,7 +400,7 @@ function MesCard({ mesData, idDueno, canWrite, onEditAbono, onEliminarAbono }: {
                       {canWrite && (
                         <td>
                           <div className="row" style={{ gap: 4 }}>
-                            {a.comprobante_url && <Button variant="ghost" size="sm" icon={<FileText size={12} />} title="Ver comprobante" onClick={() => window.open(a.comprobante_url!, '_blank', 'noopener,noreferrer')} />}
+                            {a.comprobante_url && <Button variant="ghost" size="sm" icon={<FileText size={12} />} title="Ver comprobante" onClick={() => abrirUrl(a.comprobante_url)} />}
                             <Button variant="ghost" size="sm" icon={<Pencil size={12} />} title="Editar" onClick={() => onEditAbono(idDueno, a)} />
                             <Button variant="ghost" size="sm" icon={<Trash2 size={12} />} title="Eliminar" onClick={() => onEliminarAbono(idDueno, a.id)} />
                           </div>
@@ -478,7 +481,7 @@ function HistorialAgua() {
                     <td>{METODO_LABEL(a.metodo_pago)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: '#15803d' }} className="mono">{cop(num(a.valor))}</td>
                     <td style={{ textAlign: 'center' }}>{a.comprobante_url
-                      ? <Button variant="ghost" size="sm" icon={<FileText size={13} />} onClick={() => window.open(a.comprobante_url!, '_blank', 'noopener,noreferrer')} />
+                      ? <Button variant="ghost" size="sm" icon={<FileText size={13} />} onClick={() => abrirUrl(a.comprobante_url)} />
                       : <span style={{ color: 'var(--text-faint)' }}>—</span>}</td>
                   </tr>
                 ))}

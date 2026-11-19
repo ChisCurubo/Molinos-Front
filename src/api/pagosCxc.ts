@@ -15,7 +15,7 @@
 //   módulos de abono de este proyecto) y "fecha_cobro" (no "fecha").
 // ════════════════════════════════════════════════════════════════════════════
 
-import { apiFetch, apiPost, apiPut, apiPatch, apiDelete } from './client'
+import { apiFetch, apiPost, apiPut, apiPatch, apiDelete, apiPostComprobante } from './client'
 
 type Dec = number | string | null
 
@@ -95,7 +95,6 @@ export interface AbonoCxc {
 export interface AbonoCxcPayload {
   valor: number
   metodo: string
-  comprobante_url: string
   fecha_cobro?: string
 }
 
@@ -121,7 +120,8 @@ export const pagosCxcApi = {
 
   crear: (body: CrearCxcPayload) => apiPost<CxcCuenta>('/pagos/cxc', body),
   obtener: (id: number) => apiFetch<CxcDetalle>(`/pagos/cxc/${id}`),
-  abonar: (id: number, body: AbonoCxcPayload) => apiPost<AbonoCxc>(`/pagos/cxc/${id}/abonos`, body),
+  abonar: (id: number, body: AbonoCxcPayload, comprobante?: File | null) =>
+    apiPostComprobante<AbonoCxc>(`/pagos/cxc/${id}/abonos`, body, comprobante),
   actualizar: (id: number, body: EditarCxcPayload) => apiPatch<CxcCuenta>(`/pagos/cxc/${id}`, body),
   anular: (id: number) => apiDelete<{ message?: string }>(`/pagos/cxc/${id}`),
 

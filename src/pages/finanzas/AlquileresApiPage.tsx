@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Building2, CalendarDays, CalendarRange, ChevronDown, ChevronUp, FileText, Pencil, Plus, RefreshCw, ScrollText, Tag, Trash2, Wallet, X,
+  Building2, CalendarDays, CalendarRange, ChevronDown, ChevronUp, Pencil, Plus, RefreshCw, ScrollText, Tag, Trash2, Wallet, X,
 } from 'lucide-react'
 import { Badge, Button, Card, Input, KpiTile, Modal, Select, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
+import { CuentaBancariaSelect } from '@/components/common/CatalogSelectors'
+import { ComprobanteInput } from '@/components/common/ComprobanteInput'
 import { useCanWrite } from '@/hooks/usePermissions'
 import { apiError } from '@/api/client'
 import { num } from '@/api/material'
@@ -16,6 +18,7 @@ import {
   type AbonoAlquiler, type EstadoPagoAlquiler,
   type ContratoAlquiler, type ContratoPayload,
 } from '@/api/pagosAlquileres'
+import { abrirUrl } from '@/utils/safeUrl'
 
 const mesActual = mesActualISO
 
@@ -88,7 +91,10 @@ export function AlquileresApiPage() {
 // ════════════════════════════════════════════════════════════════════════════
 // ALQUILERES
 // ════════════════════════════════════════════════════════════════════════════
-const emptyForm = () => ({ concepto: '', id_tipo: '' as number | '', id_proveedor: '' as number | '', fecha_inicio: todayISO(), valor: '' })
+const emptyForm = () => ({
+  concepto: '', id_tipo: '' as number | '', id_proveedor: '' as number | '', fecha_inicio: todayISO(), valor: '',
+  valor_iva: '', retencion_fuente_manual: '', reteiva_manual: '',
+})
 
 function AlquileresTab({ canWrite, tipos, filtroContrato, onClearFiltroContrato }: {
   canWrite: boolean; tipos: ReturnType<typeof useTiposAlquiler>
@@ -161,6 +167,9 @@ function AlquileresTab({ canWrite, tipos, filtroContrato, onClearFiltroContrato 
     setForm({
       concepto: a.concepto, id_tipo: a.id_tipo ?? '', id_proveedor: a.id_proveedor ?? '',
       fecha_inicio: a.fecha_inicio?.slice(0, 10) ?? todayISO(), valor: String(num(a.valor)),
+      valor_iva: a.valor_iva != null ? String(num(a.valor_iva)) : '',
+      retencion_fuente_manual: a.retencion_fuente_manual != null ? String(num(a.retencion_fuente_manual)) : '',
+      reteiva_manual: a.reteiva_manual != null ? String(num(a.reteiva_manual)) : '',
     })
     setModal(a)
   }
@@ -171,6 +180,13 @@ function AlquileresTab({ canWrite, tipos, filtroContrato, onClearFiltroContrato 
       concepto: form.concepto.trim(), fecha_inicio: form.fecha_inicio, valor: Number(form.valor),
       id_tipo: form.id_tipo === '' ? undefined : form.id_tipo,
       id_proveedor: form.id_proveedor === '' ? undefined : form.id_proveedor,
+      valor_iva: form.valor_iva === '' ? undefined : Number(form.valor_iva),
+      retencion_fuente_manual: modal === 'nuevo'
+        ? (form.retencion_fuente_manual === '' ? undefined : Number(form.retencion_fuente_manual))
+        : (form.retencion_fuente_manual === '' ? null : Number(form.retencion_fuente_manual)),
+      reteiva_manual: modal === 'nuevo'
+        ? (form.reteiva_manual === '' ? undefined : Number(form.reteiva_manual))
+        : (form.reteiva_manual === '' ? null : Number(form.reteiva_manual)),
     }
     try {
       if (modal === 'nuevo') { await pagosAlquileresApi.crear(body); toast.success('Alquiler creado') }
@@ -192,22 +208,22 @@ function AlquileresTab({ canWrite, tipos, filtroContrato, onClearFiltroContrato 
 
   // ── Abonar ─────────────────────────────────────────────────────
   const [abonando, setAbonando] = useState<Alquiler | null>(null)
-  const [formAbono, setFormAbono] = useState({ fecha: todayISO(), valor: '', metodo_pago: 'efectivo', nota: '', comprobante_url: '' })
+  const [formAbono, setFormAbono] = useState({ fecha: todayISO(), valor: '', metodo_pago: 'efectivo', nota: '', comprobante: null as File | null, id_cuenta_bancaria: '' as number | '' })
   const [guardandoAbono, setGuardandoAbono] = useState(false)
-  const abrirAbono = (a: Alquiler) => { setAbonando(a); setFormAbono({ fecha: todayISO(), valor: '', metodo_pago: 'efectivo', nota: '', comprobante_url: '' }) }
+  const abrirAbono = (a: Alquiler) => { setAbonando(a); setFormAbono({ fecha: todayISO(), valor: '', metodo_pago: 'efectivo', nota: '', comprobante: null, id_cuenta_bancaria: '' }) }
   const guardarAbono = async () => {
     if (!abonando) return
     const monto = Number(formAbono.valor) || 0
     const saldoActual = num(estados[abonando.id]?.saldo ?? abonando.valor)
     if (monto <= 0) { toast.error('Ingresa el valor del abono'); return }
     if (monto > saldoActual) { toast.error(`El abono no puede superar el saldo pendiente (${cop(saldoActual)}).`); return }
-    if (!formAbono.comprobante_url.trim()) { toast.error('El backend exige comprobante en cada abono — adjúntalo.'); return }
     setGuardandoAbono(true)
     try {
       await pagosAlquileresApi.crearAbono(abonando.id, {
         valor: monto, fecha: formAbono.fecha, metodo_pago: formAbono.metodo_pago,
-        comprobante_url: formAbono.comprobante_url.trim(), observaciones: formAbono.nota.trim() || undefined,
-      })
+        observaciones: formAbono.nota.trim() || undefined,
+        id_cuenta_bancaria: formAbono.metodo_pago === 'efectivo' || formAbono.id_cuenta_bancaria === '' ? undefined : formAbono.id_cuenta_bancaria,
+      }, formAbono.comprobante)
       toast.success('Abono registrado')
       setAbonando(null); cargarEstado(abonando.id); load()
     } catch (e) {
@@ -313,6 +329,13 @@ function AlquileresTab({ canWrite, tipos, filtroContrato, onClearFiltroContrato 
                   <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', margin: '0.125rem 0 0' }}>
                     {proveedorNombre ? `${proveedorNombre} · ` : ''}Desde {formatDate(a.fecha_inicio)}
                   </p>
+                  {estadoPago && (num(estadoPago.valor_retenido) > 0 || num(estadoPago.valor_iva) > 0) && (
+                    <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--amber-700)', margin: '0.125rem 0 0' }}>
+                      {num(estadoPago.valor_retenido) > 0 && <>Retención {cop(num(estadoPago.valor_retenido))}</>}
+                      {num(estadoPago.valor_retenido) > 0 && num(estadoPago.valor_iva) > 0 && ' · '}
+                      {num(estadoPago.valor_iva) > 0 && <>IVA factura {cop(num(estadoPago.valor_iva))}</>}
+                    </p>
+                  )}
                 </div>
 
                 <div style={{ minWidth: '8rem', flex: '0 0 10rem' }}>
@@ -354,7 +377,7 @@ function AlquileresTab({ canWrite, tipos, filtroContrato, onClearFiltroContrato 
                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--emerald-700)' }} className="mono">{cop(num(ab.valor))}</td>
                             <td style={{ fontSize: 'var(--fs-sm)', textTransform: 'capitalize' }}>{ab.metodo_pago ?? '—'}</td>
                             <td style={{ fontSize: 'var(--fs-sm)' }}>{ab.comprobante_url
-                              ? <span style={{ color: 'var(--emerald-700)', cursor: 'pointer' }} onClick={() => window.open(ab.comprobante_url!, '_blank', 'noopener,noreferrer')}>✓ Ver</span>
+                              ? <span style={{ color: 'var(--emerald-700)', cursor: 'pointer' }} onClick={() => abrirUrl(ab.comprobante_url)}>✓ Ver</span>
                               : <em style={{ color: 'var(--text-faint)' }}>Sin adjunto</em>}</td>
                             {canWrite && (
                               <td>
@@ -397,6 +420,20 @@ function AlquileresTab({ canWrite, tipos, filtroContrato, onClearFiltroContrato 
             helper="Si lo dejas vacío, no podrás abonar — el backend lo exige para pagar." />
           <Input label="Fecha" type="date" value={form.fecha_inicio} onChange={e => f('fecha_inicio', e.target.value)} />
           <Input label="Valor (COP)" type="number" mono step="1000" required value={form.valor} onChange={e => f('valor', e.target.value)} />
+          <Input label="IVA de la factura (opcional)" type="number" mono step="1000" placeholder="0"
+            value={form.valor_iva} onChange={e => f('valor_iva', e.target.value)}
+            helper="Si lo llenas, el backend calcula ReteIVA (15%) sobre este valor." />
+          <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)', marginTop: '0.25rem' }}>
+            <p style={{ margin: 0, fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', fontWeight: 600 }}>Retención manual (opcional)</p>
+            <div className="grid grid--form" style={{ gridColumn: '1 / -1' }}>
+              <Input label="ReteFuente manual" type="number" mono step="1" placeholder="Auto: 4% arrendamiento"
+                value={form.retencion_fuente_manual} onChange={e => f('retencion_fuente_manual', e.target.value)}
+                helper="Vacío = se calcula sola. 0 = fuerza que no aplique." />
+              <Input label="ReteIVA manual" type="number" mono step="1" placeholder="Auto: 15% del IVA"
+                value={form.reteiva_manual} onChange={e => f('reteiva_manual', e.target.value)}
+                helper="Vacío = se calcula sola. 0 = fuerza que no aplique." />
+            </div>
+          </div>
         </div>
       </Modal>
 
@@ -406,7 +443,7 @@ function AlquileresTab({ canWrite, tipos, filtroContrato, onClearFiltroContrato 
         const montoNum = Number(formAbono.valor) || 0
         return (
           <Modal open={!!abonando} title={`Registrar abono — ${abonando?.concepto ?? ''}`} onClose={() => setAbonando(null)}
-            footer={<><Button variant="secondary" onClick={() => setAbonando(null)}>Cancelar</Button><Button onClick={guardarAbono} disabled={guardandoAbono || !formAbono.valor || !formAbono.comprobante_url}>Registrar abono</Button></>}>
+            footer={<><Button variant="secondary" onClick={() => setAbonando(null)}>Cancelar</Button><Button onClick={guardarAbono} disabled={guardandoAbono || !formAbono.valor}>Registrar abono</Button></>}>
             <div className="callout" style={{ marginBottom: '1rem' }}>
               <span style={{ fontWeight: 700, color: 'var(--rose-700)' }}>Saldo pendiente: {cop(saldoActual)}</span>
             </div>
@@ -415,23 +452,13 @@ function AlquileresTab({ canWrite, tipos, filtroContrato, onClearFiltroContrato 
               <Input label="Valor abonado (COP)" type="number" mono step="1000" required placeholder="500000" value={formAbono.valor}
                 onChange={e => setFormAbono(v => ({ ...v, valor: e.target.value }))} helper={`Máximo ${cop(saldoActual)}.`} />
               <Select label="Método de pago" value={formAbono.metodo_pago} onChange={e => setFormAbono(v => ({ ...v, metodo_pago: e.target.value }))} options={METODO_OPTS} />
+              {formAbono.metodo_pago !== 'efectivo' && (
+                <CuentaBancariaSelect value={formAbono.id_cuenta_bancaria} onChange={id => setFormAbono(v => ({ ...v, id_cuenta_bancaria: id }))} />
+              )}
               <Input label="Nota (opcional)" value={formAbono.nota} onChange={e => setFormAbono(v => ({ ...v, nota: e.target.value }))} />
-              <div className="field" style={{ gridColumn: '1 / -1' }}>
-                <label className="field__label">Comprobante <span style={{ color: 'var(--rose-600)' }}>*</span></label>
-                {formAbono.comprobante_url ? (
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '0.4rem 0.7rem', border: '1px solid var(--border)', borderRadius: 6, fontSize: 'var(--fs-sm)' }}>
-                    <FileText size={15} /><span className="mono">{formAbono.comprobante_url.split('/').pop()}</span>
-                    <button type="button" onClick={() => setFormAbono(v => ({ ...v, comprobante_url: '' }))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={14} /></button>
-                  </div>
-                ) : (
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.45rem 0.85rem', border: '1px dashed var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
-                    Adjuntar comprobante
-                    <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
-                      onChange={e => { const file = e.target.files?.[0]; if (file) setFormAbono(v => ({ ...v, comprobante_url: `http://localhost/${file.name}` })) }} />
-                  </label>
-                )}
-                <span className="field__helper">El backend rechaza el abono si falta (400 "Cada abono requiere el comprobante").</span>
-              </div>
+              <ComprobanteInput style={{ gridColumn: '1 / -1' }} value={formAbono.comprobante}
+                onChange={file => setFormAbono(v => ({ ...v, comprobante: file }))}
+                helper="Comprobante del pago (opcional)." />
             </div>
             {montoNum > 0 && (
               <div className="callout" style={{ marginTop: '0.75rem' }}>

@@ -13,7 +13,7 @@
 // '@/api/material' en la UI.
 // ════════════════════════════════════════════════════════════════════════════
 
-import { apiFetch, apiPost, apiPatch, apiDelete } from './client'
+import { apiFetch, apiDelete, apiPostComprobante, apiPatchComprobante } from './client'
 
 type Dec = number | string | null
 
@@ -98,8 +98,9 @@ export interface CrearAbonoAguaPayload {
   valor: number
   fecha_abono: string
   metodo_pago?: MetodoPagoAgua | string
-  comprobante_url?: string
   observaciones?: string
+  // Si se manda y la cuenta no está exenta, el backend cobra el 4×1000 solo.
+  id_cuenta_bancaria?: number
 }
 export type EditarAbonoAguaPayload = Partial<CrearAbonoAguaPayload>
 
@@ -163,12 +164,12 @@ export const pagosAguaApi = {
     apiFetch<AguaDuenoDetalle>(`/pagos/agua/dueno/${id}${qs({ mes: filtro?.mes, anio: filtro?.anio })}`),
 
   // Registrar abono (se aplica en cascada, mes más viejo primero). 409 si no hay deuda.
-  crearAbono: (idDueno: number, body: CrearAbonoAguaPayload) =>
-    apiPost<AbonoAguaResultado>(`/pagos/agua/dueno/${idDueno}/abonos`, body),
+  crearAbono: (idDueno: number, body: CrearAbonoAguaPayload, comprobante?: File | null) =>
+    apiPostComprobante<AbonoAguaResultado>(`/pagos/agua/dueno/${idDueno}/abonos`, body, comprobante),
 
   // Editar un abono existente.
-  editarAbono: (idAbono: number, body: EditarAbonoAguaPayload) =>
-    apiPatch<EditarAbonoAguaResultado>(`/pagos/agua/abonos/${idAbono}`, body),
+  editarAbono: (idAbono: number, body: EditarAbonoAguaPayload, comprobante?: File | null) =>
+    apiPatchComprobante<EditarAbonoAguaResultado>(`/pagos/agua/abonos/${idAbono}`, body, comprobante),
 
   // Eliminar un abono.
   eliminarAbono: (idAbono: number) =>

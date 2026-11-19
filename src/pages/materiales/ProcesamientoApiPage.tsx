@@ -1,9 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, FlaskConical, Layers, Pencil, Plus, RefreshCw, Trash2, Zap } from 'lucide-react'
-import { Button, Card, Input, KpiTile, Modal, useToast } from '@/components/ui'
+import { Button, Card, Input, KpiTile, Modal, Select, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
 import { useCanWrite } from '@/hooks/usePermissions'
 import { apiError } from '@/api/client'
+import { invalidateEntradas } from '@/hooks/useEntradas'
+import { useRowSelection } from '@/hooks/useRowSelection'
+import { SelectionToolbar } from '@/components/common/SelectionToolbar'
+import { exportToExcel, type ExcelColumn } from '@/utils/exportExcel'
 import { formatCOP, todayISO } from '@/utils/format'
 import {
   materialApi, num,
@@ -127,6 +131,21 @@ function LotesTab() {
     return true
   })
 
+  // Selección de filas para "Ver seleccionados" / "Exportar a Excel".
+  const selection = useRowSelection(lotesFiltrados, (l) => l.id)
+  const exportColumns: ExcelColumn<LoteConcentradoRow>[] = [
+    { key: 'codigo', label: 'Código' },
+    { key: 'estado', label: 'Estado', value: (l) => ESTADO_LOTE[l.estado]?.label ?? l.estado },
+    { key: 'fecha_inicio', label: 'Fecha inicio', value: (l) => fechaFmt(l.fecha_inicio_fmt, l.fecha_inicio) },
+    { key: 'fecha_fin', label: 'Fecha fin', value: (l) => ((l.fecha_fin_fmt || l.fecha_fin) ? fechaFmt(l.fecha_fin_fmt, l.fecha_fin) : '') },
+    { key: 'mat_procesado', label: 'Mat. procesado (t seco)', format: 'decimal', value: (l) => num(l.material_seco_procesado) },
+    { key: 'concentrado', label: 'Concentrado (t húm)', format: 'decimal', value: (l) => num(l.toneladas_humedo) },
+    { key: 'tenor_au', label: 'Tenor Au (gr/t)', format: 'decimal', value: (l) => (l.au_gr_x_ton != null ? num(l.au_gr_x_ton) : num(l.tenor) || '') },
+    { key: 'tenor_ag', label: 'Tenor Ag (gr/t)', format: 'decimal', value: (l) => (l.ag_gr_x_ton != null ? num(l.ag_gr_x_ton) : '') },
+    { key: 'maquila', label: 'Costo maquila', format: 'money', value: (l) => num(l.maquila_total) },
+    { key: 'precio_total', label: 'Precio total material', format: 'money', value: (l) => num(l.precio_total_material) },
+  ]
+
   // Selección por ÍNDICE de fila (el `id` de /inventario/crudo no es único por
   // fila; usar el id marcaba varias filas a la vez). El id real se resuelve al guardar.
   const disponibles = crudo
@@ -167,6 +186,7 @@ function LotesTab() {
       setSelVincular(new Set()); setTonVincular('')
       materialApi.getInventarioCrudo().then(setCrudo).catch(() => {})
       setDetalle(prev => { const n = { ...prev }; delete n[vincularLote.id]; return n }); load()
+      invalidateEntradas()
       toast.success(`Vinculado · acumulado ${num(res.material_seco_procesado).toFixed(3)} t seco`)
     } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
   }
@@ -306,6 +326,7 @@ function LotesTab() {
     try {
       await materialApi.deleteConcentradoMaterial(lote.id, idEntrada)
       setDetalle(prev => { const n = { ...prev }; delete n[lote.id]; return n }); load()
+      invalidateEntradas()
       toast.success('Material desvinculado')
     } catch (e) { toast.error(apiError(e).message) }
   }
@@ -338,7 +359,13 @@ function LotesTab() {
       </div>
 
       <Card title={`Lotes de concentrado (${lotesFiltrados.length} / ${lotes.length})`}
-        actions={<div className="row" style={{ gap: 8 }}>
+        actions={<div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <SelectionToolbar
+            count={selection.count}
+            onlySelected={selection.onlySelected}
+            onToggleOnlySelected={() => selection.setOnlySelected((v) => !v)}
+            onExport={() => exportToExcel('lotes-concentrado', exportColumns, selection.selectedItems)}
+          />
           <Button size="sm" variant="secondary" icon={<RefreshCw size={14}/>} onClick={load}>Refrescar</Button>
           {canWrite && <Button size="sm" icon={<Plus size={15}/>} onClick={() => setCrearOpen(true)}>Nuevo lote</Button>}
         </div>}>
@@ -359,6 +386,7 @@ function LotesTab() {
             <thead>
               <tr>
                 <th style={{ width: '1.5rem' }}></th>
+                <th style={{ width: '1.5rem' }}></th>
                 <th>Código</th><th>Estado</th><th>Fechas</th><th>Proceso</th>
                 <th style={{ textAlign: 'right' }}>Mat. procesado</th>
                 <th style={{ textAlign: 'right' }}>Concentrado</th>
@@ -370,12 +398,12 @@ function LotesTab() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={canWrite ? 11 : 10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Cargando…</td></tr>
+                <tr><td colSpan={canWrite ? 12 : 11} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Cargando…</td></tr>
               ) : error ? (
-                <tr><td colSpan={canWrite ? 11 : 10} style={{ textAlign: 'center', color: 'var(--rose-600)', padding: '2rem' }}>{error} · <button onClick={load} style={{ background: 'none', border: 'none', color: 'var(--amber-700)', textDecoration: 'underline', cursor: 'pointer' }}>Reintentar</button></td></tr>
-              ) : lotesFiltrados.length === 0 ? (
-                <tr><td colSpan={canWrite ? 11 : 10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Sin registros</td></tr>
-              ) : lotesFiltrados.map(l => {
+                <tr><td colSpan={canWrite ? 12 : 11} style={{ textAlign: 'center', color: 'var(--rose-600)', padding: '2rem' }}>{error} · <button onClick={load} style={{ background: 'none', border: 'none', color: 'var(--amber-700)', textDecoration: 'underline', cursor: 'pointer' }}>Reintentar</button></td></tr>
+              ) : selection.visibleItems.length === 0 ? (
+                <tr><td colSpan={canWrite ? 12 : 11} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Sin registros</td></tr>
+              ) : selection.visibleItems.map(l => {
                 const isExp = expanded.has(l.id)
                 const det = detalle[l.id]
                 const matVin = det?.materiales ?? []
@@ -385,6 +413,9 @@ function LotesTab() {
                 return (
                   <React.Fragment key={l.id}>
                     <tr style={{ cursor: 'pointer', ...(isExp ? { background: 'var(--slate-50)' } : {}) }} onClick={() => toggleExpand(l.id)}>
+                      <td onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={selection.isSelected(l)} onChange={() => selection.toggle(l)} />
+                      </td>
                       <td style={{ color: 'var(--text-muted)' }}>{isExp ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</td>
                       <td style={{ fontWeight: 700 }} className="mono">{l.codigo}</td>
                       <td><span className={`badge ${ESTADO_LOTE[l.estado]?.badge ?? 'badge--neutral'}`}>{ESTADO_LOTE[l.estado]?.label ?? l.estado}</span></td>
@@ -425,7 +456,7 @@ function LotesTab() {
 
                     {isExp && (
                       <tr style={{ background: 'var(--slate-50)' }}>
-                        <td colSpan={canWrite ? 11 : 10} style={{ padding: '0.75rem 1rem 1rem 2rem' }}>
+                        <td colSpan={canWrite ? 12 : 11} style={{ padding: '0.75rem 1rem 1rem 2rem' }}>
                           {det && (
                             <div className="callout" style={{ marginBottom: '0.75rem', fontSize: 'var(--fs-sm)', display: 'flex', gap: '1.25rem', flexWrap: 'wrap' }}>
                               <span>Mat. seco: <strong>{num(det.material_seco_procesado).toFixed(3)} t</strong></span>
@@ -793,6 +824,24 @@ function ProcesamientoTab() {
   const totalSec = filtrados.reduce((s, m) => s + num(m.total_material_seco), 0)
   const lotesActivos = new Set(rows.filter(m => m.estado_lote === 'en_proceso').map(m => m.id_lote)).size
 
+  // Selección + exportar a Excel. "Agrupar por" crea una pestaña por cada mina/lote
+  // distinto en la selección — si entran más viajes/mineros, simplemente salen más pestañas.
+  const selection = useRowSelection(filtrados, (m) => m.id_entrada)
+  const [agrupar, setAgrupar] = useState<'ninguno' | 'mina' | 'lote'>('ninguno')
+  const exportColumns: ExcelColumn<ProcesamientoMaterialRow>[] = [
+    { key: 'codigo_lote', label: 'Lote' },
+    { key: 'numero_volqueta', label: 'N° Volqueta', format: 'integer' },
+    { key: 'mina', label: 'Mina / Minero', value: (m) => m.mina ?? '' },
+    { key: 'fecha_llegada', label: 'Fecha', value: (m) => fmtDMY(m.fecha_llegada) },
+    { key: 'peso_llegada_planta', label: 'Peso llega planta (t)', format: 'decimal', summable: true, value: (m) => num(m.peso_llegada_planta) },
+    { key: 'total_material_seco', label: 'Total material seco (t)', format: 'decimal', summable: true, value: (m) => num(m.total_material_seco) },
+    { key: 'tenor', label: 'Tenor (gr/t)', format: 'decimal', value: (m) => (num(m.tenor) > 0 ? num(m.tenor) : '') },
+    { key: 'estado_lote', label: 'Estado lote', value: (m) => (m.estado_lote ? ESTADO_LOTE[m.estado_lote]?.label ?? m.estado_lote : '') },
+  ]
+  const groupByFn = agrupar === 'mina' ? (m: ProcesamientoMaterialRow) => m.mina ?? 'Sin mina'
+    : agrupar === 'lote' ? (m: ProcesamientoMaterialRow) => m.codigo_lote ?? 'Sin lote'
+    : undefined
+
   const desvincular = async (m: ProcesamientoMaterialRow) => {
     if (m.estado_lote !== 'en_proceso') { toast.error(`No se puede desvincular: el lote ${m.codigo_lote} ya fue cerrado.`); return }
     if (m.id_lote == null) return
@@ -813,7 +862,28 @@ function ProcesamientoTab() {
       </div>
 
       <Card title={`Procesamiento de material (${filtrados.length} vínculos)`}
-        actions={<Button size="sm" variant="secondary" icon={<RefreshCw size={14}/>} onClick={load}>Refrescar</Button>}>
+        actions={<div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {selection.count > 0 && (
+            <Select
+              label="Agrupar en pestañas"
+              value={agrupar}
+              onChange={(e) => setAgrupar(e.target.value as typeof agrupar)}
+              options={[
+                { value: 'ninguno', label: 'Sin agrupar' },
+                { value: 'mina', label: 'Una pestaña por mina' },
+                { value: 'lote', label: 'Una pestaña por lote' },
+              ]}
+              style={{ minWidth: '12rem' }}
+            />
+          )}
+          <SelectionToolbar
+            count={selection.count}
+            onlySelected={selection.onlySelected}
+            onToggleOnlySelected={() => selection.setOnlySelected((v) => !v)}
+            onExport={() => exportToExcel('procesamiento-material', exportColumns, selection.selectedItems, { groupBy: groupByFn })}
+          />
+          <Button size="sm" variant="secondary" icon={<RefreshCw size={14}/>} onClick={load}>Refrescar</Button>
+        </div>}>
         <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <input className="field__input" placeholder="Lote…" value={fLote} onChange={e => setFLote(e.target.value)} style={{ maxWidth: '12rem' }} />
           <div className="segment">
@@ -828,12 +898,14 @@ function ProcesamientoTab() {
             <thead>
               <tr>
                 <th style={{ background: '#f6f5f3', borderBottom: '1px solid #e5e7eb' }}></th>
+                <th style={{ background: '#f6f5f3', borderBottom: '1px solid #e5e7eb' }}></th>
                 <th colSpan={4} style={GROUP_TH}>Identificación</th>
                 <th colSpan={3} style={GROUP_TH}>Pesos y ley</th>
                 <th style={GROUP_TH}>Estado</th>
                 {canWrite && <th style={{ background: '#f6f5f3', borderBottom: '1px solid #e5e7eb' }}></th>}
               </tr>
               <tr>
+                <th style={{ width: '1.5rem' }}></th>
                 <th style={{ width: '1.5rem' }}></th>
                 <th>Lote</th><th>Vol.</th><th>Mina</th><th>Fecha</th>
                 <th style={{ textAlign: 'right' }}>T. Aportadas</th>
@@ -845,16 +917,19 @@ function ProcesamientoTab() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={canWrite ? 10 : 9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Cargando…</td></tr>
+                <tr><td colSpan={canWrite ? 11 : 10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Cargando…</td></tr>
               ) : error ? (
-                <tr><td colSpan={canWrite ? 10 : 9} style={{ textAlign: 'center', color: 'var(--rose-600)', padding: '2rem' }}>{error} · <button onClick={load} style={{ background: 'none', border: 'none', color: 'var(--amber-700)', textDecoration: 'underline', cursor: 'pointer' }}>Reintentar</button></td></tr>
-              ) : filtrados.length === 0 ? (
-                <tr><td colSpan={canWrite ? 10 : 9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Sin registros</td></tr>
-              ) : filtrados.map(m => {
+                <tr><td colSpan={canWrite ? 11 : 10} style={{ textAlign: 'center', color: 'var(--rose-600)', padding: '2rem' }}>{error} · <button onClick={load} style={{ background: 'none', border: 'none', color: 'var(--amber-700)', textDecoration: 'underline', cursor: 'pointer' }}>Reintentar</button></td></tr>
+              ) : selection.visibleItems.length === 0 ? (
+                <tr><td colSpan={canWrite ? 11 : 10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>Sin registros</td></tr>
+              ) : selection.visibleItems.map(m => {
                 const isExp = expandedRow === m.id_entrada
                 return (
                   <React.Fragment key={m.id_entrada}>
                     <tr style={{ cursor: 'pointer', ...(isExp ? { background: 'var(--slate-50)' } : {}) }} onClick={() => setExpandedRow(isExp ? null : m.id_entrada)}>
+                      <td onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={selection.isSelected(m)} onChange={() => selection.toggle(m)} />
+                      </td>
                       <td style={{ color: 'var(--text-muted)' }}>{isExp ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</td>
                       <td style={{ fontWeight: 700 }} className="mono">{m.codigo_lote}</td>
                       <td className="mono" style={{ fontSize: 'var(--fs-sm)' }}>{m.numero_volqueta}</td>
@@ -872,7 +947,7 @@ function ProcesamientoTab() {
                     </tr>
                     {isExp && (
                       <tr>
-                        <td colSpan={canWrite ? 10 : 9} style={{ padding: '0.85rem 1.25rem', background: '#fafaf9' }}>
+                        <td colSpan={canWrite ? 11 : 10} style={{ padding: '0.85rem 1.25rem', background: '#fafaf9' }}>
                           <div style={{ fontWeight: 700, fontSize: 'var(--fs-sm)', marginBottom: '0.5rem', color: 'var(--amber-800)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                             <FlaskConical size={14}/> Análisis del material ({m.analisis.length})
                           </div>
@@ -912,7 +987,7 @@ function ProcesamientoTab() {
             {!loading && !error && filtrados.length > 0 && (
               <tfoot>
                 <tr style={{ fontWeight: 700 }}>
-                  <td colSpan={5}>Total ({filtrados.length})</td>
+                  <td colSpan={6}>Total ({filtrados.length})</td>
                   <td style={{ textAlign: 'right' }} className="mono">{totalHum.toFixed(3)} t</td>
                   <td style={{ textAlign: 'right' }} className="mono">{totalSec.toFixed(4)} t</td>
                   <td colSpan={canWrite ? 3 : 2} />

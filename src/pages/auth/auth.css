@@ -88,6 +88,8 @@
 .auth__mod-card--info:hover:not(:disabled)  { border-color: var(--info-500); }
 .auth__mod-card--amber { border-color: var(--amber-200); }
 .auth__mod-card--amber:hover:not(:disabled) { border-color: var(--amber-600); }
+.auth__mod-card--brown { border-color: var(--brown-200); }
+.auth__mod-card--brown:hover:not(:disabled) { border-color: var(--brown-600); }
 
 .auth__mod-icon {
   width: 3rem; height: 3rem;
@@ -100,6 +102,7 @@
 .auth__mod-icon--green { background: var(--color-primary-soft); color: var(--green-700); }
 .auth__mod-icon--info  { background: var(--info-50);            color: var(--info-700); }
 .auth__mod-icon--amber { background: var(--amber-50);           color: var(--amber-700); }
+.auth__mod-icon--brown { background: var(--brown-50);           color: var(--brown-700); }
 
 .auth__mod-label {
   display: block;

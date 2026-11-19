@@ -2,6 +2,10 @@ import { useState } from 'react'
 import { BarChart3, ExternalLink, RefreshCw } from 'lucide-react'
 import { Button, Card, InfoCallout, Input } from '@/components/ui'
 import { PageHeader } from '@/components/common/Page'
+import { abrirUrl, urlSegura } from '@/utils/safeUrl'
+
+// Solo se incrustan informes publicados en Power BI (evita cargar sitios arbitrarios en el iframe).
+const esPowerBI = (u: string) => { const s = urlSegura(u); return !!s && new URL(s).protocol === 'https:' && new URL(s).hostname === 'app.powerbi.com' }
 
 // URL de ejemplo. Reemplace por el enlace "Publicar en la web" de su informe de Power BI.
 const DEFAULT_URL = ''
@@ -9,6 +13,7 @@ const DEFAULT_URL = ''
 export function InformesPage() {
   const [url, setUrl] = useState(DEFAULT_URL)
   const [applied, setApplied] = useState(DEFAULT_URL)
+  const [err, setErr] = useState('')
 
   return (
     <div className="page">
@@ -17,7 +22,7 @@ export function InformesPage() {
         subtitle="Visualice el tablero gerencial embebido directamente en el sistema."
         actions={
           applied && (
-            <Button variant="secondary" icon={<ExternalLink size={18} />} onClick={() => window.open(applied, '_blank')}>
+            <Button variant="secondary" icon={<ExternalLink size={18} />} onClick={() => abrirUrl(applied)}>
               Abrir en pestaña nueva
             </Button>
           )
@@ -32,10 +37,11 @@ export function InformesPage() {
               placeholder="https://app.powerbi.com/view?r=..."
               value={url}
               onChange={(e) => setUrl(e.target.value)}
+              error={err || undefined}
               helper="Pegue aquí el enlace de inserción de su informe de Power BI."
             />
           </div>
-          <Button icon={<RefreshCw size={18} />} onClick={() => setApplied(url)}>
+          <Button icon={<RefreshCw size={18} />} onClick={() => { if (!url || esPowerBI(url)) { setErr(''); setApplied(url) } else setErr('Solo se aceptan enlaces https://app.powerbi.com/…') }}>
             Cargar informe
           </Button>
         </div>
@@ -58,6 +64,8 @@ export function InformesPage() {
           <iframe
             title="Informe de Power BI"
             src={applied}
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+            referrerPolicy="no-referrer"
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
             allowFullScreen
           />

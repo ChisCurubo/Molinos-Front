@@ -1,25 +1,25 @@
-// Cliente HTTP con fallback automático a datos mock cuando la API no responde
-import { getStoredToken } from '@/auth/session'
-
-const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3005/api/v1'
+// Cliente HTTP con fallback a datos mock cuando la API no responde.
+// El fallback SOLO existe en desarrollo local (MOCKS_PERMITIDOS); en cualquier otro caso
+// el error se propaga para que la pantalla muestre el fallo en vez de datos inventados.
+import { API_BASE as BASE, MOCKS_PERMITIDOS } from '@/config/entorno'
 
 function authHeaders(): HeadersInit {
-  const token = getStoredToken()
-  return token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' }
+  return { 'Content-Type': 'application/json' }
 }
 
 export async function apiFetch<T>(url: string, mockData: T): Promise<T> {
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 3000)
-    const res = await fetch(`${BASE}${url}`, { headers: authHeaders(), signal: controller.signal })
+    const res = await fetch(`${BASE}${url}`, { headers: authHeaders(), credentials: 'include', signal: controller.signal })
     clearTimeout(timer)
-    if (!res.ok) return mockData
+    if (!res.ok) throw new Error(`api-error ${res.status}`)
     const data = await res.json() as T | { data: T }
     if (data && typeof data === 'object' && 'data' in data) return (data as { data: T }).data
     return data as T
-  } catch {
-    return mockData
+  } catch (e) {
+    if (MOCKS_PERMITIDOS) return mockData
+    throw e
   }
 }
 
@@ -29,14 +29,15 @@ export async function apiPost<T>(url: string, body: unknown, onMock?: (b: unknow
     const timer = setTimeout(() => controller.abort(), 3000)
     const res = await fetch(`${BASE}${url}`, {
       method: 'POST',
-      headers: authHeaders(),
+      headers: authHeaders(), credentials: 'include',
       body: JSON.stringify(body),
       signal: controller.signal,
     })
     clearTimeout(timer)
-    if (!res.ok) throw new Error('api-error')
+    if (!res.ok) throw new Error(`api-error ${res.status}`)
     return (await res.json()) as T
-  } catch {
+  } catch (e) {
+    if (!MOCKS_PERMITIDOS) throw e
     if (onMock) return onMock(body)
     return { ok: true, mock: true, ...(body as object) } as T
   }

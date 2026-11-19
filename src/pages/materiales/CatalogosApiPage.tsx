@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Pencil, Plus, Trash2, Coins, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react'
 import { Button, Card, Input, Select, Modal, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
@@ -53,6 +53,11 @@ function TableState({ loading, error, empty, cols, onRetry }: {
 function ZonasTab({ canWrite }: { canWrite: boolean }) {
   const toast = useToast()
   const { data, loading, error, reload } = useZonas()
+  const [busca, setBusca] = useState('')
+  const visibles = useMemo(() => {
+    const q = busca.trim().toLowerCase()
+    return q ? data.filter(z => z.nombre.toLowerCase().includes(q)) : data
+  }, [data, busca])
   const [modal, setModal] = useState<null | 'nuevo' | number>(null)
   const [form, setForm] = useState({ nombre: '', descripcion: '', valor_tonelada: '' })
   const [tarifaModal, setTarifaModal] = useState<null | number>(null)
@@ -62,6 +67,10 @@ function ZonasTab({ canWrite }: { canWrite: boolean }) {
   const openNuevo = () => { setForm({ nombre: '', descripcion: '', valor_tonelada: '' }); setModal('nuevo') }
   const openEdit = (id: number) => {
     const z = data.find(x => x.id === id)!
+    // El listado (GET /material/mina/catalogo/zonas) no trae `descripcion` y no
+    // existe un GET por id — no hay forma de precargar la descripción real.
+    // Se deja vacío a propósito: si no se toca, el guardado no la borra
+    // (updateZona solo manda descripcion si el campo tiene texto).
     setForm({ nombre: z.nombre, descripcion: '', valor_tonelada: '' })
     setModal(id)
   }
@@ -108,13 +117,14 @@ function ZonasTab({ canWrite }: { canWrite: boolean }) {
 
   return (
     <>
-      <Card title={`Zonas (${data.length})`} actions={canWrite && <Button size="sm" icon={<Plus size={16} />} onClick={openNuevo}>Nueva zona</Button>}>
+      <Card title={`Zonas (${visibles.length} de ${data.length})`} actions={canWrite && <Button size="sm" icon={<Plus size={16} />} onClick={openNuevo}>Nueva zona</Button>}>
+        <Input label="Buscar" placeholder="Nombre de la zona…" value={busca} onChange={e => setBusca(e.target.value)} style={{ maxWidth: '18rem', marginBottom: '0.75rem' }} />
         <div className="table-wrap">
           <table className="data-table">
             <thead><tr><th>Nombre</th><th style={{ textAlign: 'right' }}>Tarifa flete /t</th>{canWrite && <th></th>}</tr></thead>
             <tbody>
-              <TableState loading={loading} error={error} empty={data.length === 0} cols={canWrite ? 3 : 2} onRetry={reload} />
-              {!loading && !error && data.map(z => {
+              <TableState loading={loading} error={error} empty={visibles.length === 0} cols={canWrite ? 3 : 2} onRetry={reload} />
+              {!loading && !error && visibles.map(z => {
                 const t = num(z.tarifa)
                 return (
                   <tr key={z.id}>
@@ -139,7 +149,8 @@ function ZonasTab({ canWrite }: { canWrite: boolean }) {
         footer={<><Button variant="secondary" onClick={() => setModal(null)}>Cancelar</Button><Button onClick={save} disabled={saving || !form.nombre.trim()}>Guardar</Button></>}>
         <div className="grid grid--form">
           <Input label="Nombre" required value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} />
-          <Input label="Descripción" value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} />
+          <Input label="Descripción" value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))}
+            helper={modal !== 'nuevo' ? 'El sistema no puede traer la descripción ya guardada — déjalo vacío para no tocarla, o escribe para reemplazarla.' : undefined} />
           {modal === 'nuevo' && (
             <Input label="Tarifa flete inicial (COP/t)" type="number" step="1000" value={form.valor_tonelada}
               onChange={e => setForm(f => ({ ...f, valor_tonelada: e.target.value }))} helper="Opcional. Luego se versiona desde el botón de tarifa." />
@@ -166,6 +177,11 @@ const METODO_OPTS = [
 function MinerosTab({ canWrite }: { canWrite: boolean }) {
   const toast = useToast()
   const { data, loading, error, reload } = useMineros()
+  const [busca, setBusca] = useState('')
+  const visibles = useMemo(() => {
+    const q = busca.trim().toLowerCase()
+    return q ? data.filter(m => m.nombre.toLowerCase().includes(q) || (m.alias ?? '').toLowerCase().includes(q)) : data
+  }, [data, busca])
   const [modal, setModal] = useState<null | 'nuevo' | number>(null)
   const [form, setForm] = useState({ nombre: '', alias: '', metodo_calculo: 'por_gramo' as MetodoCalculo, estado: 'activo' })
   const [saving, setSaving] = useState(false)
@@ -198,13 +214,14 @@ function MinerosTab({ canWrite }: { canWrite: boolean }) {
 
   return (
     <>
-      <Card title={`Mineros (${data.length})`} actions={canWrite && <Button size="sm" icon={<Plus size={16} />} onClick={openNuevo}>Nuevo minero</Button>}>
+      <Card title={`Mineros (${visibles.length} de ${data.length})`} actions={canWrite && <Button size="sm" icon={<Plus size={16} />} onClick={openNuevo}>Nuevo minero</Button>}>
+        <Input label="Buscar" placeholder="Nombre o alias…" value={busca} onChange={e => setBusca(e.target.value)} style={{ maxWidth: '18rem', marginBottom: '0.75rem' }} />
         <div className="table-wrap">
           <table className="data-table">
             <thead><tr><th>Nombre</th><th>Alias</th><th>Método pago</th><th>Estado</th>{canWrite && <th></th>}</tr></thead>
             <tbody>
-              <TableState loading={loading} error={error} empty={data.length === 0} cols={canWrite ? 5 : 4} onRetry={reload} />
-              {!loading && !error && data.map(m => (
+              <TableState loading={loading} error={error} empty={visibles.length === 0} cols={canWrite ? 5 : 4} onRetry={reload} />
+              {!loading && !error && visibles.map(m => (
                 <tr key={m.id}>
                   <td style={{ fontWeight: 700 }}>{m.nombre}</td>
                   <td>{m.alias ?? <em style={{ color: 'var(--text-faint)' }}>—</em>}</td>
@@ -237,6 +254,16 @@ function MinerosTab({ canWrite }: { canWrite: boolean }) {
 export function MinasTab({ canWrite }: { canWrite: boolean }) {
   const toast = useToast()
   const { data, loading, error, reload } = useMinas()
+  const [busca, setBusca] = useState('')
+  const visibles = useMemo(() => {
+    const q = busca.trim().toLowerCase()
+    if (!q) return data
+    return data.filter(m =>
+      m.nombre.toLowerCase().includes(q) ||
+      (m.minero_alias ?? m.minero ?? '').toLowerCase().includes(q) ||
+      (m.zona ?? '').toLowerCase().includes(q) ||
+      (m.ubicacion ?? '').toLowerCase().includes(q))
+  }, [data, busca])
   const [modal, setModal] = useState<null | 'nuevo' | number>(null)
   const [form, setForm] = useState({ nombre: '', id_minero: '' as number | '', id_zona: '' as number | '', ubicacion: '', estado: 'activa' })
   const [saving, setSaving] = useState(false)
@@ -271,13 +298,14 @@ export function MinasTab({ canWrite }: { canWrite: boolean }) {
 
   return (
     <>
-      <Card title={`Minas (${data.length})`} actions={canWrite && <Button size="sm" icon={<Plus size={16} />} onClick={openNuevo}>Nueva mina</Button>}>
+      <Card title={`Minas (${visibles.length} de ${data.length})`} actions={canWrite && <Button size="sm" icon={<Plus size={16} />} onClick={openNuevo}>Nueva mina</Button>}>
+        <Input label="Buscar" placeholder="Nombre, minero, zona o ubicación…" value={busca} onChange={e => setBusca(e.target.value)} style={{ maxWidth: '18rem', marginBottom: '0.75rem' }} />
         <div className="table-wrap">
           <table className="data-table">
             <thead><tr><th>Nombre</th><th>Minero</th><th>Zona</th><th>Ubicación</th><th>Estado</th>{canWrite && <th></th>}</tr></thead>
             <tbody>
-              <TableState loading={loading} error={error} empty={data.length === 0} cols={canWrite ? 6 : 5} onRetry={reload} />
-              {!loading && !error && data.map(m => (
+              <TableState loading={loading} error={error} empty={visibles.length === 0} cols={canWrite ? 6 : 5} onRetry={reload} />
+              {!loading && !error && visibles.map(m => (
                 <tr key={m.id}>
                   <td style={{ fontWeight: 700 }}>{m.nombre}</td>
                   <td>{m.minero_alias ?? m.minero ?? <em style={{ color: 'var(--text-faint)' }}>—</em>}</td>
@@ -320,6 +348,12 @@ function PreciosMaterialTab({ canWrite }: { canWrite: boolean }) {
   const [data, setData] = useState<PrecioMaterial[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [busca, setBusca] = useState('')
+  const visibles = useMemo(() => {
+    const q = busca.trim().toLowerCase()
+    if (!q) return data
+    return data.filter(p => (p.minero ?? '').toLowerCase().includes(q) || (p.zona ?? '').toLowerCase().includes(q))
+  }, [data, busca])
   const [modal, setModal] = useState<null | 'nuevo' | number>(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
@@ -378,11 +412,12 @@ function PreciosMaterialTab({ canWrite }: { canWrite: boolean }) {
 
   return (
     <>
-      <Card title={`Precios de material (${data.length})`}
+      <Card title={`Precios de material (${visibles.length} de ${data.length})`}
         actions={canWrite && <Button size="sm" icon={<Plus size={16} />} onClick={openNuevo}>Nuevo precio</Button>}>
         <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
           Tabla de referencia/consulta. No afecta los cálculos: el precio de compra se asigna manualmente en el flujo de entrada.
         </p>
+        <Input label="Buscar" placeholder="Minero o zona…" value={busca} onChange={e => setBusca(e.target.value)} style={{ maxWidth: '18rem', marginBottom: '0.75rem' }} />
         <div className="table-wrap">
           <table className="data-table">
             <thead>
@@ -394,8 +429,8 @@ function PreciosMaterialTab({ canWrite }: { canWrite: boolean }) {
               </tr>
             </thead>
             <tbody>
-              <TableState loading={loading} error={error} empty={data.length === 0} cols={canWrite ? 8 : 7} onRetry={load} />
-              {!loading && !error && data.map(p => {
+              <TableState loading={loading} error={error} empty={visibles.length === 0} cols={canWrite ? 8 : 7} onRetry={load} />
+              {!loading && !error && visibles.map(p => {
                 const precio = p.metodo === 'por_tonelada' ? num(p.precio_por_tonelada) : num(p.precio_por_gramo)
                 const min = p.intervalo_tenor_min != null ? num(p.intervalo_tenor_min) : null
                 const max = p.intervalo_tenor_max != null ? num(p.intervalo_tenor_max) : null

@@ -103,7 +103,7 @@ export function InventarioApiPage() {
   return (
     <div className="page">
       <PageHeader
-        title="Inventario"
+        title="Inventario material"
         subtitle="Material crudo disponible y concentrado en canoa listo para despacho."
         actions={<Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={load}>Refrescar</Button>}
       />

@@ -1,7 +1,9 @@
-import { LogOut, Menu } from 'lucide-react'
+import { KeyRound, LogOut, Menu } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui'
 import { useAuth } from '@/context/AuthContext'
 import { ROLES } from '@/auth/permissions'
+import { MODO } from '@/config/entorno'
 import { AccessibilityMenu } from './AccessibilityMenu'
 import { BalanceWidget } from './BalanceWidget'
 
@@ -11,6 +13,7 @@ interface TopBarProps {
 
 export function TopBar({ onToggleMenu }: TopBarProps) {
   const { user, logout } = useAuth()
+  const navigate = useNavigate()
   if (!user) return null
   const initial = user.nombre.charAt(0).toUpperCase()
 
@@ -32,6 +35,8 @@ export function TopBar({ onToggleMenu }: TopBarProps) {
 
       <div className="spacer" />
 
+      {MODO === 'local' && <span className="badge badge--neutral" title="Ambiente local">LOCAL</span>}
+
       <BalanceWidget />
 
       <AccessibilityMenu />
@@ -41,6 +46,15 @@ export function TopBar({ onToggleMenu }: TopBarProps) {
         <span className="topbar__user-role">{ROLES[user.role].label}</span>
       </div>
       <span className="topbar__avatar" aria-hidden="true">{initial}</span>
+      <Button
+        className="topbar__logout"
+        variant="ghost"
+        size="sm"
+        icon={<KeyRound size={20} />}
+        aria-label="Cambiar contraseña"
+        title="Cambiar contraseña"
+        onClick={() => navigate('/cambiar-password')}
+      />
       <Button
         className="topbar__logout"
         variant="ghost"

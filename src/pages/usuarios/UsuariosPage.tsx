@@ -11,10 +11,11 @@ import { formatDate } from '@/utils/format'
 import type { Role, User } from '@/types'
 
 const roleOptions = (Object.keys(ROLES) as Role[]).map((r) => ({ value: r, label: ROLES[r].label }))
-const roleTone: Record<Role, 'success' | 'info' | 'warning'> = {
+const roleTone: Record<Role, 'success' | 'info' | 'warning' | 'neutral'> = {
   administrador: 'info',
   materiales: 'success',
   financiero: 'warning',
+  importaciones: 'neutral',
 }
 
 export function UsuariosPage() {

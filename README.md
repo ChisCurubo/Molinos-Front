@@ -20,6 +20,85 @@ npm run lint      # tsc --noEmit (chequeo de tipos sin compilar)
 
 ---
 
+## Despliegue (Docker + Caddy)
+
+El front se despliega como **un solo contenedor**: la imagen compila React con Vite y la sirve con **Caddy**, que además saca el certificado HTTPS solo y reenvía `/api/*` al backend. El servidor **no necesita Node ni Vite**: todo el build ocurre dentro de la imagen.
+
+### Requisitos del servidor
+| Herramienta | Versión | Notas |
+|---|---|---|
+| Ubuntu | 24.04 (ARM o x86) | La VM `molinos-front` de Oracle |
+| Docker Engine | **≥ 28** (probado con 28.0.1) | Instalar `docker-ce` desde el repositorio oficial de Docker |
+| Docker Compose | **v2** (probado con v2.33.1) | Plugin `docker compose` (con espacio, no `docker-compose`) |
+| git, curl | cualquiera | Para clonar y para detectar la IP pública |
+| Node / npm | **no se instala** | La imagen usa `node:22-alpine` (Node 22) solo para compilar |
+| Caddy | **no se instala** | La imagen usa `caddy:2-alpine` (probado con 2.11.9) |
+
+Las imágenes base son multi-arquitectura (x86 y ARM). Salida a internet necesaria: Docker Hub, Let's Encrypt y `api.ipify.org`.
+
+### Red y puertos
+| Puerto | Quién | Para qué |
+|---|---|---|
+| 22, 80, 443 (TCP) | internet → `molinos-front` | SSH, redirección HTTP→HTTPS y HTTPS |
+| 3005 | solo red 10.0.0.0/16 | API Node en `molinos-back` (10.0.1.10), no es pública |
+
+El navegador siempre llama a `/api/v1` en el mismo origen; Caddy lo reenvía a `10.0.1.10:3005`. Por eso no hay CORS y la cookie de sesión funciona.
+
+### Desplegar desde cero
+```bash
+# 1. Docker (una sola vez)
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER      # cerrar y abrir sesión SSH después
+
+# 2. Código y configuración
+sudo mkdir -p /opt/molinos && sudo chown $USER /opt/molinos
+git clone -b feat/moduloJuliana-back https://github.com/ChisCurubo/Molinos-Front.git /opt/molinos/front-src
+echo "BACK_IP=10.0.1.10" | sudo tee /opt/molinos/front.env
+
+# 3. Levantar (detecta solo que es Oracle porque la VM tiene la IP 10.0.1.20)
+sudo bash /opt/molinos/front-src/deploy/setup-front.sh
+```
+Al terminar imprime `[molinos] frontend listo en https://<ip-con-guiones>.sslip.io`. En la VM esto lo hace **cloud-init** automáticamente (clona el repo en `/opt/molinos/front-src` y llama a `deploy/setup-front.sh`).
+
+**Después de conocer la URL**, ponerla en el backend (`FRONT_URL` en `/opt/molinos/front_url.env` de la VM back) y reiniciar el API; si no, el CORS del modo `oracle` la rechaza.
+
+### Actualizar
+```bash
+ssh -i molinos_oracle_ed25519 ubuntu@<ip-publica-front> 'sudo /opt/molinos/update.sh'
+```
+Reconstruye la imagen con `deploy/setup-front.sh`; los certificados (volumen `caddy-data`) no se tocan.
+
+### Logs y diagnóstico
+```bash
+docker compose -p molinos-front logs --tail 100 web      # logs de Caddy
+docker compose -p molinos-front ps                       # estado
+curl -I https://<ip-con-guiones>.sslip.io/api/v1/health  # 200 = backend vivo (si es backend viejo: /api/v1/info/health → 200/401)
+```
+| Síntoma | Causa probable |
+|---|---|
+| El script termina sin certificado | Puertos 80/443 cerrados, o sslip.io caído. Plan B: `SITE=<ip-con-guiones>.nip.io sudo -E bash deploy/setup-front.sh` |
+| Pantallas con error de red / 502 | El backend (10.0.1.10:3005) no responde; revisar desde la VM: `curl http://10.0.1.10:3005/api/v1/health` |
+| Login funciona pero se cierra la sesión | Se está entrando por `http://` o por la IP; usar la URL `https://…sslip.io` |
+| `permission denied` con docker | Falta `usermod -aG docker` (o usar `sudo`) |
+
+> **No borrar** el volumen `molinos-front_caddy-data`: ahí están los certificados y Let's Encrypt limita las renovaciones.
+
+### Probarlo en tu PC (Windows, Docker Desktop)
+```bash
+# Git Bash, con el backend local corriendo en :3005
+MODO=local bash deploy/setup-front.sh        # → http://localhost:8080
+docker compose -p molinos-front down
+```
+Sin Docker: `npm run dev` (puerto 5173) o `npm run preview` (4173); ambos reenvían `/api` al backend en `VITE_BACK_URL` (por defecto `http://localhost:3005`).
+
+### Modos (se detectan solos)
+- **`oracle`**: cualquier host que no sea de red privada (`*.sslip.io`, IP pública, `10.0.1.20`). Sin datos de ejemplo: si la API falla, la pantalla muestra el error.
+- **`local`**: `localhost`, `192.168.x`, `10.x` (salvo `10.0.1.20`), `172.16–31.x`, `*.local`. Muestra la etiqueta "LOCAL" y permite datos de ejemplo solo con `npm run dev`.
+
+Detalle de los archivos en [`deploy/README.md`](deploy/README.md).
+
+---
+
 ## Cuentas de prueba
 
 | Rol           | Correo                        | Contraseña    | Acceso                                                |

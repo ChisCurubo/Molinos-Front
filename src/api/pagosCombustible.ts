@@ -11,7 +11,7 @@
 //    igual patrón que Flete/Agua/Mulas.
 // ════════════════════════════════════════════════════════════════════════════
 
-import { apiFetch, apiPost, apiPut, apiPatch, apiDelete } from './client'
+import { apiFetch, apiDelete, apiPostComprobante, apiPutComprobante, apiPatchComprobante } from './client'
 
 type Dec = number | string | null
 
@@ -76,7 +76,6 @@ export interface CrearCombustiblePayload {
   fecha?: string
   descripcion?: string
   valor: number
-  comprobante_url?: string
 }
 export type EditarCombustiblePayload = Partial<CrearCombustiblePayload>
 
@@ -190,8 +189,9 @@ export interface GasolineraEstadoCuenta {
 export interface CrearAbonoGasolineraPayload {
   valor: number
   metodo_pago?: MetodoPagoCombustible | string
-  comprobante_url: string
   fecha_abono?: string
+  // Si se manda y la cuenta no está exenta, el backend cobra el 4×1000 solo.
+  id_cuenta_bancaria?: number
 }
 export interface EditarAbonoGasolineraPayload extends Partial<CrearAbonoGasolineraPayload> {
   observaciones?: string
@@ -247,9 +247,11 @@ export const pagosCombustibleApi = {
       id_dueno_volqueta: filtro?.id_dueno_volqueta, tipo_consumo: filtro?.tipo_consumo,
       forma_pago: filtro?.forma_pago,
     })}`),
-  crear: (body: CrearCombustiblePayload) => apiPost<CombustibleRegistro>('/pagos/combustible', body),
+  crear: (body: CrearCombustiblePayload, comprobante?: File | null) =>
+    apiPostComprobante<CombustibleRegistro>('/pagos/combustible', body, comprobante),
   getDetalle: (id: number) => apiFetch<CombustibleRegistro>(`/pagos/combustible/${id}`),
-  editar: (id: number, body: EditarCombustiblePayload) => apiPut<CombustibleRegistro>(`/pagos/combustible/${id}`, body),
+  editar: (id: number, body: EditarCombustiblePayload, comprobante?: File | null) =>
+    apiPutComprobante<CombustibleRegistro>(`/pagos/combustible/${id}`, body, comprobante),
   eliminar: (id: number) => apiDelete<{ message?: string }>(`/pagos/combustible/${id}`),
   getNetoFleteDueno: (idDueno: number) => apiFetch<NetoFleteDueno>(`/pagos/combustible/dueno/${idDueno}/neto-flete`),
 
@@ -261,14 +263,14 @@ export const pagosCombustibleApi = {
   // ── 3. Pago a la gasolinera (línea de crédito) ───────────────────────────
   getDeuda: () => apiFetch<GasolineraDeuda[]>('/pagos/combustible/pagos/deuda'),
   getGasolineraDetalle: (id: number) => apiFetch<GasolineraEstadoCuenta>(`/pagos/combustible/pagos/gasolinera/${id}`),
-  crearAbonoGasolinera: (id: number, body: CrearAbonoGasolineraPayload) =>
-    apiPost<AbonoGasolineraResultado>(`/pagos/combustible/pagos/gasolinera/${id}/abonos`, body),
+  crearAbonoGasolinera: (id: number, body: CrearAbonoGasolineraPayload, comprobante?: File | null) =>
+    apiPostComprobante<AbonoGasolineraResultado>(`/pagos/combustible/pagos/gasolinera/${id}/abonos`, body, comprobante),
   getHistorialAbonos: (filtro?: HistorialAbonosGasolineraFiltro) =>
     apiFetch<HistorialAbonosGasolineraResponse>(`/pagos/combustible/pagos/abonos${qs({
       id_gasopago: filtro?.id_gasopago, page: filtro?.page, limit: filtro?.limit,
     })}`),
-  editarAbonoGasolinera: (idAbono: number, body: EditarAbonoGasolineraPayload) =>
-    apiPatch<EditarAbonoGasolineraResultado>(`/pagos/combustible/pagos/abonos/${idAbono}`, body),
+  editarAbonoGasolinera: (idAbono: number, body: EditarAbonoGasolineraPayload, comprobante?: File | null) =>
+    apiPatchComprobante<EditarAbonoGasolineraResultado>(`/pagos/combustible/pagos/abonos/${idAbono}`, body, comprobante),
   eliminarAbonoGasolinera: (idAbono: number) =>
     apiDelete<{ id: number; concepto: string; valor_pagado: Dec; saldo: Dec; estado: string }>(`/pagos/combustible/pagos/abonos/${idAbono}`),
 }

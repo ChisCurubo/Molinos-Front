@@ -1,23 +1,30 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { AtSign, Send } from 'lucide-react'
 import { Button, Input, InfoCallout } from '@/components/ui'
-import { useAuth } from '@/context/AuthContext'
+import { authApi } from '@/api/auth'
+import { apiErrorMessage } from '@/api/client'
 import './auth.css'
 
 export function ForgotPasswordPage() {
-  const { requestReset } = useAuth()
-  const navigate = useNavigate()
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [error, setError] = useState('')
-  const [code, setCode] = useState<string | null>(null)
+  const [sent, setSent] = useState(false)
+  const [loading, setLoading] = useState(false)
 
-  const onSubmit = (e: FormEvent) => {
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError('')
-    const res = requestReset(email)
-    if (res.ok) setCode(res.token ?? null)
-    else setError(res.error ?? 'No fue posible generar el código.')
+    if (!username.trim()) { setError('Escriba su usuario.'); return }
+    setLoading(true)
+    try {
+      await authApi.forgotPassword(username.trim().toLowerCase())
+      setSent(true)
+    } catch (err) {
+      setError(apiErrorMessage(err))
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -25,52 +32,40 @@ export function ForgotPasswordPage() {
       <div className="auth__brand">
         <img src="/logo-molinos.png" alt="Molinos de Colombia S.A.S" className="auth__logo" />
         <h1 className="auth__brand-title">Recuperar acceso</h1>
-        <p className="auth__brand-text">Le enviaremos un código de verificación para restablecer su contraseña.</p>
+        <p className="auth__brand-text">Le enviaremos un enlace para restablecer su contraseña.</p>
       </div>
 
       <div className="auth__form-side">
         <form className="auth__card" onSubmit={onSubmit} noValidate>
           <div>
             <h2 className="auth__heading">¿Olvidó su contraseña?</h2>
-            <p className="auth__sub">Escriba su correo y le generaremos un código de verificación.</p>
+            <p className="auth__sub">Escriba su usuario y le enviaremos las instrucciones.</p>
           </div>
 
           <Input
-            label="Correo electrónico"
-            type="email"
-            autoComplete="email"
+            label="Usuario"
+            autoComplete="username"
             placeholder="nombre@molinosdecolombia.com"
             icon={<AtSign size={20} />}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
             error={error || undefined}
+            disabled={sent}
             required
           />
 
-          {code ? (
-            <>
-              <InfoCallout>
-                Código de verificación generado (simulado). En producción llegaría al correo. Su código es:{' '}
-                <strong className="mono">{code}</strong>
-              </InfoCallout>
-              <Button
-                size="lg"
-                block
-                onClick={() => navigate(`/restablecer?email=${encodeURIComponent(email)}`)}
-              >
-                Continuar al restablecimiento
-              </Button>
-            </>
+          {sent ? (
+            <InfoCallout>
+              Si el usuario existe, recibirá las instrucciones para restablecer su contraseña.
+            </InfoCallout>
           ) : (
-            <Button type="submit" size="lg" block icon={<Send size={20} />}>
-              Enviar código
+            <Button type="submit" size="lg" block icon={<Send size={20} />} disabled={loading}>
+              {loading ? 'Enviando…' : 'Enviar instrucciones'}
             </Button>
           )}
 
           <div className="auth__row-between">
-            <Link to="/login" className="auth__link">
-              ← Volver a iniciar sesión
-            </Link>
+            <Link to="/login" className="auth__link">← Volver a iniciar sesión</Link>
           </div>
         </form>
       </div>

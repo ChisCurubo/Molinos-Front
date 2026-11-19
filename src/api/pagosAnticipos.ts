@@ -13,7 +13,7 @@
 // los campos abajo son la mejor inferencia — si algo no calza en vivo, avisar.
 // ════════════════════════════════════════════════════════════════════════════
 
-import { apiFetch, apiPost, apiDelete } from './client'
+import { apiFetch, apiDelete, apiPostComprobante } from './client'
 
 type Dec = number | string | null
 
@@ -51,11 +51,12 @@ export interface CrearAnticipoPayload {
   tercero: TerceroAnticipo
   id: number
   monto: number
-  comprobante_url: string
   fecha?: string
   metodo_pago?: string
   descripcion?: string
   observaciones?: string
+  // Si se manda y la cuenta no está exenta, el backend cobra el 4×1000 solo.
+  id_cuenta_bancaria?: number
 }
 
 export interface AnticiposFiltro {
@@ -74,7 +75,8 @@ function qs(params: Record<string, string | number | boolean | undefined>): stri
 }
 
 export const pagosAnticiposApi = {
-  crear: (body: CrearAnticipoPayload) => apiPost<Anticipo>('/pagos/anticipos', body),
+  crear: (body: CrearAnticipoPayload, comprobante?: File | null) =>
+    apiPostComprobante<Anticipo>('/pagos/anticipos', body, comprobante),
   listar: (filtro?: AnticiposFiltro) =>
     apiFetch<Anticipo[]>(`/pagos/anticipos${qs({ tercero: filtro?.tercero, id: filtro?.id, estado: filtro?.estado })}`),
   getDetalle: (id: number) => apiFetch<AnticipoDetalle>(`/pagos/anticipos/${id}`),

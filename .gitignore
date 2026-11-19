@@ -74,3 +74,6 @@ docs/
 playwright-report/
 test-results/
 
+
+# Caddyfile.local es config de despliegue (sin secretos), no un override personal
+!deploy/Caddyfile.local

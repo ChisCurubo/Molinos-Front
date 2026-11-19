@@ -11,7 +11,7 @@
 // otros clientes, no aquí.
 // ════════════════════════════════════════════════════════════════════════════
 
-import { apiFetch, apiPost, apiPut, apiDelete } from './client'
+import { apiFetch, apiPut, apiDelete, apiPostComprobante } from './client'
 
 type Dec = number | string | null
 
@@ -36,6 +36,9 @@ export interface Ingreso {
   id_prestamo_fin?: number | null
   comprobante_url?: string | null
   created_at?: string
+  // Cuenta bancaria donde entró el cobro (si se asoció una) — nombre ya
+  // resuelto por el backend.
+  cuenta_bancaria?: string | null
 }
 
 export interface IngresoPayload {
@@ -43,11 +46,11 @@ export interface IngresoPayload {
   valor: number
   concepto: string
   fecha?: string
-  comprobante_url?: string
 }
 
 export interface IngresosFiltro {
   id_categoria?: number
+  id_cuenta_bancaria?: number
   desde?: string
   hasta?: string
 }
@@ -104,9 +107,11 @@ export const pagosIngresosApi = {
 
   listar: (filtro?: IngresosFiltro) =>
     apiFetch<Ingreso[]>(`/pagos/ingresos${qs({
-      id_categoria: filtro?.id_categoria, desde: filtro?.desde, hasta: filtro?.hasta,
+      id_categoria: filtro?.id_categoria, id_cuenta_bancaria: filtro?.id_cuenta_bancaria,
+      desde: filtro?.desde, hasta: filtro?.hasta,
     })}`),
-  crear: (body: IngresoPayload) => apiPost<Ingreso>('/pagos/ingresos', body),
+  crear: (body: IngresoPayload, comprobante?: File | null) =>
+    apiPostComprobante<Ingreso>('/pagos/ingresos', body, comprobante),
   actualizar: (id: number, body: Partial<IngresoPayload>) => apiPut<Ingreso>(`/pagos/ingresos/${id}`, body),
   // 409 si el ingreso es espejo de un préstamo (id_prestamo_fin no-null).
   eliminar: (id: number) => apiDelete<{ message?: string }>(`/pagos/ingresos/${id}`),

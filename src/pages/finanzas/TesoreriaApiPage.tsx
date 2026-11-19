@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ComprobanteInput } from '@/components/common/ComprobanteInput'
 import {
-  ArrowDownCircle, ArrowUpCircle, CalendarRange, ChevronDown, ChevronUp, FileText, Landmark, Pencil, Plus, Scale, Trash2, Wallet, X,
+  ArrowDownCircle, ArrowUpCircle, CalendarRange, ChevronDown, ChevronUp, Landmark, Pencil, Plus, Scale, Trash2, Wallet,
 } from 'lucide-react'
 import { Badge, Button, Card, Input, KpiTile, Modal, Select, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
@@ -214,7 +215,7 @@ function FlujoCajaTab() {
 // /flujo-caja/anual que ya cargó el hook; el detalle (ingresos individuales +
 // egresos por categoría) se pide solo al expandir ese mes.
 // ════════════════════════════════════════════════════════════════════════════
-const emptyForm = () => ({ id_categoria: '' as number | '', concepto: '', valor: '', fecha: todayISO(), comprobante_url: '' })
+const emptyForm = () => ({ id_categoria: '' as number | '', concepto: '', valor: '', fecha: todayISO(), comprobante: null as File | null })
 
 function DetalleMensualTab({ canWrite, categorias }: { canWrite: boolean; categorias: CategoriaIngreso[] }) {
   const toast = useToast()
@@ -253,11 +254,11 @@ function DetalleMensualTab({ canWrite, categorias }: { canWrite: boolean; catego
   const [modal, setModal] = useState<null | 'nuevo' | Ingreso>(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(emptyForm())
-  const f = (k: keyof ReturnType<typeof emptyForm>, v: string) => setForm(s => ({ ...s, [k]: v }))
+  const f = (k: Exclude<keyof ReturnType<typeof emptyForm>, 'comprobante'>, v: string) => setForm(s => ({ ...s, [k]: v }))
 
   const openNuevo = () => { setForm(emptyForm()); setModal('nuevo') }
   const openEdit = (i: Ingreso) => {
-    setForm({ id_categoria: i.id_categoria, concepto: i.concepto, valor: String(num(i.valor)), fecha: i.fecha?.slice(0, 10) ?? todayISO(), comprobante_url: i.comprobante_url ?? '' })
+    setForm({ id_categoria: i.id_categoria, concepto: i.concepto, valor: String(num(i.valor)), fecha: i.fecha?.slice(0, 10) ?? todayISO(), comprobante: null })
     setModal(i)
   }
   const refrescarTodo = () => {
@@ -269,10 +270,10 @@ function DetalleMensualTab({ canWrite, categorias }: { canWrite: boolean; catego
     setSaving(true)
     const body: IngresoPayload = {
       id_categoria: form.id_categoria, concepto: form.concepto.trim(), valor: Number(form.valor),
-      fecha: form.fecha, comprobante_url: form.comprobante_url.trim() || undefined,
+      fecha: form.fecha,
     }
     try {
-      if (modal === 'nuevo') { await pagosIngresosApi.crear(body); toast.success('Ingreso registrado') }
+      if (modal === 'nuevo') { await pagosIngresosApi.crear(body, form.comprobante); toast.success('Ingreso registrado') }
       else if (modal) { await pagosIngresosApi.actualizar(modal.id, body); toast.success('Ingreso actualizado') }
       setModal(null); refrescarTodo()
     } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
@@ -399,21 +400,7 @@ function DetalleMensualTab({ canWrite, categorias }: { canWrite: boolean; catego
             onChange={e => f('id_categoria', e.target.value)} options={categorias.map(c => ({ value: String(c.id), label: c.nombre }))} />
           <Input label="Fecha" type="date" value={form.fecha} onChange={e => f('fecha', e.target.value)} helper="Determina en qué mes aparece listado." />
           <Input label="Valor (COP)" type="number" mono step="1000" required value={form.valor} onChange={e => f('valor', e.target.value)} style={{ gridColumn: '1 / -1' }} />
-          <div className="field" style={{ gridColumn: '1 / -1' }}>
-            <label className="field__label">Comprobante (opcional)</label>
-            {form.comprobante_url ? (
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '0.4rem 0.7rem', border: '1px solid var(--border)', borderRadius: 6, fontSize: 'var(--fs-sm)' }}>
-                <FileText size={15} /><span className="mono">{form.comprobante_url.split('/').pop()}</span>
-                <button type="button" onClick={() => f('comprobante_url', '')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={14} /></button>
-              </div>
-            ) : (
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.45rem 0.85rem', border: '1px dashed var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
-                Adjuntar comprobante
-                <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
-                  onChange={e => { const file = e.target.files?.[0]; if (file) f('comprobante_url', `http://localhost/${file.name}`) }} />
-              </label>
-            )}
-          </div>
+          <ComprobanteInput label="Comprobante (opcional)" style={{ gridColumn: '1 / -1' }} value={form.comprobante} existingUrl={modal && modal !== 'nuevo' ? modal.comprobante_url : null} onChange={file => setForm(s => ({ ...s, comprobante: file }))} />
         </div>
       </Modal>
 
@@ -456,11 +443,11 @@ function MesSeleccionadoTab({ canWrite, categorias }: { canWrite: boolean; categ
   const [modal, setModal] = useState<null | 'nuevo' | Ingreso>(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(emptyForm())
-  const f = (k: keyof ReturnType<typeof emptyForm>, v: string) => setForm(s => ({ ...s, [k]: v }))
+  const f = (k: Exclude<keyof ReturnType<typeof emptyForm>, 'comprobante'>, v: string) => setForm(s => ({ ...s, [k]: v }))
 
   const openNuevo = () => { setForm({ ...emptyForm(), fecha: mesSel === mesActualISO() ? todayISO() : `${mesSel}-01` }); setModal('nuevo') }
   const openEdit = (i: Ingreso) => {
-    setForm({ id_categoria: i.id_categoria, concepto: i.concepto, valor: String(num(i.valor)), fecha: i.fecha?.slice(0, 10) ?? todayISO(), comprobante_url: i.comprobante_url ?? '' })
+    setForm({ id_categoria: i.id_categoria, concepto: i.concepto, valor: String(num(i.valor)), fecha: i.fecha?.slice(0, 10) ?? todayISO(), comprobante: null })
     setModal(i)
   }
   const save = async () => {
@@ -468,10 +455,10 @@ function MesSeleccionadoTab({ canWrite, categorias }: { canWrite: boolean; categ
     setSaving(true)
     const body: IngresoPayload = {
       id_categoria: form.id_categoria, concepto: form.concepto.trim(), valor: Number(form.valor),
-      fecha: form.fecha, comprobante_url: form.comprobante_url.trim() || undefined,
+      fecha: form.fecha,
     }
     try {
-      if (modal === 'nuevo') { await pagosIngresosApi.crear(body); toast.success('Ingreso registrado') }
+      if (modal === 'nuevo') { await pagosIngresosApi.crear(body, form.comprobante); toast.success('Ingreso registrado') }
       else if (modal) { await pagosIngresosApi.actualizar(modal.id, body); toast.success('Ingreso actualizado') }
       setModal(null); refrescar()
     } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
@@ -579,21 +566,7 @@ function MesSeleccionadoTab({ canWrite, categorias }: { canWrite: boolean; categ
             onChange={e => f('id_categoria', e.target.value)} options={categorias.map(c => ({ value: String(c.id), label: c.nombre }))} />
           <Input label="Fecha" type="date" value={form.fecha} onChange={e => f('fecha', e.target.value)} helper="Determina en qué mes aparece listado." />
           <Input label="Valor (COP)" type="number" mono step="1000" required value={form.valor} onChange={e => f('valor', e.target.value)} style={{ gridColumn: '1 / -1' }} />
-          <div className="field" style={{ gridColumn: '1 / -1' }}>
-            <label className="field__label">Comprobante (opcional)</label>
-            {form.comprobante_url ? (
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '0.4rem 0.7rem', border: '1px solid var(--border)', borderRadius: 6, fontSize: 'var(--fs-sm)' }}>
-                <FileText size={15} /><span className="mono">{form.comprobante_url.split('/').pop()}</span>
-                <button type="button" onClick={() => f('comprobante_url', '')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={14} /></button>
-              </div>
-            ) : (
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.45rem 0.85rem', border: '1px dashed var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
-                Adjuntar comprobante
-                <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
-                  onChange={e => { const file = e.target.files?.[0]; if (file) f('comprobante_url', `http://localhost/${file.name}`) }} />
-              </label>
-            )}
-          </div>
+          <ComprobanteInput label="Comprobante (opcional)" style={{ gridColumn: '1 / -1' }} value={form.comprobante} existingUrl={modal && modal !== 'nuevo' ? modal.comprobante_url : null} onChange={file => setForm(s => ({ ...s, comprobante: file }))} />
         </div>
       </Modal>
 

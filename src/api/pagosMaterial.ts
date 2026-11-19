@@ -11,7 +11,7 @@
 // ⚠️ Los decimales llegan como string desde MySQL ("120.0000"): usa num().
 // ════════════════════════════════════════════════════════════════════════════
 
-import { apiFetch, apiPost, apiPatch, apiDelete } from './client'
+import { apiFetch, apiPost, apiPatch, apiDelete, apiPostComprobante, apiPatchComprobante } from './client'
 
 // Un decimal puede llegar como number, string o null desde el backend.
 type Dec = number | string | null
@@ -109,9 +109,9 @@ export interface CrearAbonoPayload {
   valor: number
   fecha_abono: string
   metodo_pago?: MetodoPago | string
-  /** OBLIGATORIO: cada abono lleva su soporte. */
-  comprobante_url: string
   observaciones?: string
+  // Si se manda y la cuenta no está exenta, el backend cobra el 4×1000 solo.
+  id_cuenta_bancaria?: number
 }
 
 export type EditarAbonoPayload = Partial<CrearAbonoPayload>
@@ -167,13 +167,14 @@ export const pagosMaterialApi = {
   // Anular (borrado lógico). 409 si ya tiene abonos.
   anularCuenta: (id: number) => apiDelete<{ message?: string }>(`/pagos/material/${id}`),
 
-  // Registrar un abono (comprobante_url OBLIGATORIO; valor > 0 y ≤ saldo).
-  crearAbono: (idCuenta: number, body: CrearAbonoPayload) =>
-    apiPost<CreatedCuentaResponse>(`/pagos/material/${idCuenta}/abonos`, body),
+  // Registrar un abono (comprobante OBLIGATORIO; valor > 0 y ≤ saldo). El archivo va
+  // junto con los datos: el backend lo sube a MinIO y guarda esa URL.
+  crearAbono: (idCuenta: number, body: CrearAbonoPayload, comprobante?: File | null) =>
+    apiPostComprobante<CreatedCuentaResponse>(`/pagos/material/${idCuenta}/abonos`, body, comprobante),
 
   // Editar un abono (recalcula la cuenta; no deja pasar del valor_total).
-  editarAbono: (idAbono: number, body: EditarAbonoPayload) =>
-    apiPatch<{ message?: string }>(`/pagos/material/abonos/${idAbono}`, body),
+  editarAbono: (idAbono: number, body: EditarAbonoPayload, comprobante?: File | null) =>
+    apiPatchComprobante<{ message?: string }>(`/pagos/material/abonos/${idAbono}`, body, comprobante),
 
   // Eliminar un abono (la cuenta vuelve a parcial/pendiente).
   eliminarAbono: (idAbono: number) => apiDelete<{ message?: string }>(`/pagos/material/abonos/${idAbono}`),

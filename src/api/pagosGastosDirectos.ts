@@ -17,7 +17,7 @@
 //   libro-gastos directo contra /pagos/gastos-directos/:id da 404.
 // ════════════════════════════════════════════════════════════════════════════
 
-import { apiFetch, apiPost, apiPatch, apiDelete } from './client'
+import { apiFetch, apiDelete, apiPostComprobante, apiPatchComprobante } from './client'
 
 export type MetodoPagoGastoDirecto = 'efectivo' | 'transferencia' | 'nequi' | 'deposito' | 'otro'
 
@@ -36,10 +36,11 @@ export interface GastoDirecto {
 export interface GastoDirectoPayload {
   concepto: string
   monto: number
-  comprobante_url: string
   fecha?: string
   metodo_pago?: MetodoPagoGastoDirecto
   observaciones?: string
+  // Si se manda y la cuenta no está exenta, el backend cobra el 4×1000 solo.
+  id_cuenta_bancaria?: number
 }
 
 export interface GastoDirectoFiltro {
@@ -58,7 +59,9 @@ export const pagosGastosDirectosApi = {
   listar: (filtro?: GastoDirectoFiltro) =>
     apiFetch<GastoDirecto[]>(`/pagos/gastos-directos${qs({ desde: filtro?.desde, hasta: filtro?.hasta })}`),
   obtener: (id: number) => apiFetch<GastoDirecto>(`/pagos/gastos-directos/${id}`),
-  crear: (body: GastoDirectoPayload) => apiPost<GastoDirecto>('/pagos/gastos-directos', body),
-  actualizar: (id: number, body: Partial<GastoDirectoPayload>) => apiPatch<GastoDirecto>(`/pagos/gastos-directos/${id}`, body),
+  crear: (body: GastoDirectoPayload, comprobante?: File | null) =>
+    apiPostComprobante<GastoDirecto>('/pagos/gastos-directos', body, comprobante),
+  actualizar: (id: number, body: Partial<GastoDirectoPayload>, comprobante?: File | null) =>
+    apiPatchComprobante<GastoDirecto>(`/pagos/gastos-directos/${id}`, body, comprobante),
   anular: (id: number) => apiDelete<{ message?: string }>(`/pagos/gastos-directos/${id}`),
 }

@@ -1,0 +1,26 @@
+name: molinos-front
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: caddy run --config /etc/caddy/Caddyfile.${MODO:-local} --adapter caddyfile
+    environment:
+      SITE: ${SITE:-:80}
+      PUBLIC_IP: ${PUBLIC_IP:-}
+      BACK_UPSTREAM: ${BACK_UPSTREAM:-host.docker.internal:3005}
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "443:443"
+    volumes:
+      # Aquí quedan los certificados: si se pierden, Let's Encrypt limita las renovaciones.
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

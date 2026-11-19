@@ -1,0 +1,33 @@
+# (Sin bloque global "email": si ACME_EMAIL viniera vacío, Caddy no arranca. Let's Encrypt no lo exige.)
+{$SITE} {
+	encode zstd gzip
+
+	handle /api/* {
+		request_body {
+			max_size 15MB
+		}
+		# Sin health_uri: hay un solo upstream, el chequeo activo no aporta. La verificación la hace setup-front.sh.
+		reverse_proxy {$BACK_UPSTREAM}
+	}
+
+	handle {
+		root * /srv
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
+
+# Si entran por http://<ip> o https://<ip>, mandarlos al dominio con certificado
+http://{$PUBLIC_IP}, http://10.0.1.20 {
+	redir https://{$SITE}{uri} permanent
+}

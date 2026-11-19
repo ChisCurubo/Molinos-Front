@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { onToastWarning } from '@/utils/toastBus'
 import './toast.css'
 
 type ToastType = 'success' | 'error' | 'info' | 'warning'
@@ -38,6 +39,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const error   = useCallback((m: string) => toast(m, 'error'),   [toast])
   const info    = useCallback((m: string) => toast(m, 'info'),    [toast])
   const warning = useCallback((m: string) => toast(m, 'warning'), [toast])
+
+  // El cliente HTTP (fuera de React) avisa aquí cuando el backend guardó el registro
+  // pero no pudo subir el comprobante (ver api/client.ts).
+  useEffect(() => onToastWarning(warning), [warning])
 
   return (
     <ToastContext.Provider value={{ toast, success, error, info, warning }}>

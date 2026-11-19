@@ -6,7 +6,8 @@ import {
 import { Button, Card, Input, KpiTile, Modal, Select, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
-import { DuenoSelect, VolquetaSelect } from '@/components/common/CatalogSelectors'
+import { DuenoSelect, VolquetaSelect, CuentaBancariaSelect } from '@/components/common/CatalogSelectors'
+import { ComprobanteInput } from '@/components/common/ComprobanteInput'
 import { useCanWrite } from '@/hooks/usePermissions'
 import { apiError } from '@/api/client'
 import { num } from '@/api/material'
@@ -19,6 +20,7 @@ import {
   type GasolineraDeuda, type GasolineraEstadoCuenta, type GasolineraCuentaMes, type GasolineraConsumoResumen, type AbonoGasolinera,
   type MetodoPagoCombustible, type EstadoCuentaPago,
 } from '@/api/pagosCombustible'
+import { abrirUrl } from '@/utils/safeUrl'
 
 const cop = formatCOP
 
@@ -96,11 +98,11 @@ interface ConsumoForm {
   fecha: string
   descripcion: string
   valor: string
-  comprobante_url: string
+  comprobante: File | null
 }
 const emptyConsumoForm = (): ConsumoForm => ({
   tipo_consumo: 'vehiculo', forma_pago: 'credito', id_gasolinera: '', id_planta: '',
-  id_dueno_volqueta: '', id_vehiculo: '', fecha: todayISO(), descripcion: '', valor: '', comprobante_url: '',
+  id_dueno_volqueta: '', id_vehiculo: '', fecha: todayISO(), descripcion: '', valor: '', comprobante: null,
 })
 
 type PageTab = 'consumos' | 'reportes' | 'credito'
@@ -172,7 +174,7 @@ export function CombustibleApiPage() {
       fecha: (r.fecha ?? '').slice(0, 10) || todayISO(),
       descripcion: r.descripcion ?? r.observaciones ?? '',
       valor: String(num(r.valor)),
-      comprobante_url: r.comprobante_url ?? '',
+      comprobante: null,
     })
     setConsumoModal(true)
   }
@@ -188,8 +190,7 @@ export function CombustibleApiPage() {
       try {
         await pagosCombustibleApi.editar(editConsumo!.id, {
           descripcion: form.descripcion.trim() || undefined,
-          comprobante_url: form.comprobante_url.trim() || undefined,
-        })
+        }, form.comprobante)
         toast.success('Consumo actualizado')
         setConsumoModal(false); setEditConsumo(null); load()
       } catch (e) { toast.error(apiError(e).message) } finally { setSavingConsumo(false) }
@@ -208,17 +209,16 @@ export function CombustibleApiPage() {
         valor: Number(form.valor),
         fecha: form.fecha || undefined,
         descripcion: form.descripcion.trim() || undefined,
-        comprobante_url: form.comprobante_url.trim() || undefined,
         id_gasolinera: form.forma_pago === 'credito' && form.id_gasolinera !== '' ? Number(form.id_gasolinera) : undefined,
         id_planta: form.tipo_consumo === 'planta' && form.id_planta !== '' ? Number(form.id_planta) : undefined,
         id_dueno_volqueta: form.tipo_consumo === 'vehiculo' && form.id_dueno_volqueta !== '' ? Number(form.id_dueno_volqueta) : undefined,
         id_vehiculo: form.tipo_consumo === 'vehiculo' && form.id_vehiculo !== '' ? Number(form.id_vehiculo) : undefined,
       }
       if (editConsumo) {
-        await pagosCombustibleApi.editar(editConsumo.id, payload)
+        await pagosCombustibleApi.editar(editConsumo.id, payload, form.comprobante)
         toast.success('Consumo actualizado')
       } else {
-        await pagosCombustibleApi.crear(payload)
+        await pagosCombustibleApi.crear(payload, form.comprobante)
         toast.success('Consumo registrado')
       }
       setConsumoModal(false); setEditConsumo(null); load()
@@ -413,8 +413,7 @@ export function CombustibleApiPage() {
               <Input label="Valor (COP)" mono value={cop(Number(form.valor))} disabled />
               <Input label="Descripción" placeholder="40 galones ACPM para tambores" style={{ gridColumn: '1 / -1' }}
                 value={form.descripcion} onChange={e => f('descripcion', e.target.value)} />
-              <Input label="Comprobante (URL)" placeholder="https://…/comprobante.png" style={{ gridColumn: '1 / -1' }}
-                value={form.comprobante_url} onChange={e => f('comprobante_url', e.target.value)} />
+              <ComprobanteInput style={{ gridColumn: '1 / -1' }} value={form.comprobante} existingUrl={editConsumo?.comprobante_url} onChange={file => f('comprobante', file)} />
             </div>
           </>
         ) : (
@@ -442,8 +441,7 @@ export function CombustibleApiPage() {
             <Input label="Valor (COP)" type="number" mono step="1000" required placeholder="320000" value={form.valor} onChange={e => f('valor', e.target.value)} />
             <Input label="Descripción (opcional)" placeholder="40 galones ACPM para tambores" style={{ gridColumn: '1 / -1' }}
               value={form.descripcion} onChange={e => f('descripcion', e.target.value)} />
-            <Input label="Comprobante (URL, opcional)" placeholder="https://…/comprobante.png" style={{ gridColumn: '1 / -1' }}
-              value={form.comprobante_url} onChange={e => f('comprobante_url', e.target.value)} />
+            <ComprobanteInput style={{ gridColumn: '1 / -1' }} value={form.comprobante} existingUrl={editConsumo?.comprobante_url} onChange={file => f('comprobante', file)} />
           </div>
         )}
       </Modal>
@@ -623,8 +621,8 @@ function ReportesTab() {
 // ════════════════════════════════════════════════════════════════════════════
 // LÍNEA DE CRÉDITO — pago a la gasolinera (cascada por mes, igual patrón que Agua/Mulas)
 // ════════════════════════════════════════════════════════════════════════════
-interface AbonoForm { valor: string; fecha_abono: string; metodo_pago: MetodoPagoCombustible; comprobante_url: string; observaciones: string }
-const emptyAbono = (valor = ''): AbonoForm => ({ valor, fecha_abono: todayISO(), metodo_pago: 'transferencia', comprobante_url: '', observaciones: '' })
+interface AbonoForm { valor: string; fecha_abono: string; metodo_pago: MetodoPagoCombustible; comprobante: File | null; observaciones: string; id_cuenta_bancaria: number | '' }
+const emptyAbono = (valor = ''): AbonoForm => ({ valor, fecha_abono: todayISO(), metodo_pago: 'transferencia', comprobante: null, observaciones: '', id_cuenta_bancaria: '' })
 
 function gasolineraDeudaLabel(g: GasolineraDeuda) { return g.alias && g.alias !== g.nombre ? `${g.nombre} (${g.alias})` : g.nombre }
 
@@ -682,13 +680,12 @@ function GasolineraCreditoTab({ canWrite }: { canWrite: boolean }) {
     if (!abonoTarget) return
     const valor = Number(abonoForm.valor)
     if (!(valor > 0)) { toast.error('El valor debe ser mayor a 0'); return }
-    if (!abonoForm.comprobante_url.trim()) { toast.error('El comprobante es obligatorio'); return }
     setSavingAbono(true)
     try {
       const res = await pagosCombustibleApi.crearAbonoGasolinera(abonoTarget.id, {
         valor, metodo_pago: abonoForm.metodo_pago, fecha_abono: abonoForm.fecha_abono,
-        comprobante_url: abonoForm.comprobante_url.trim(),
-      })
+        id_cuenta_bancaria: abonoForm.metodo_pago === 'efectivo' || abonoForm.id_cuenta_bancaria === '' ? undefined : abonoForm.id_cuenta_bancaria,
+      }, abonoForm.comprobante)
       const nMeses = res.aplicado_a?.length ?? 0
       const aFavor = num(res.saldo_a_favor_generado)
       toast.success(`Abono aplicado a ${nMeses} cuenta${nMeses === 1 ? '' : 's'} por ${cop(num(res.total_aplicado) || valor)}${aFavor > 0 ? ` · ${cop(aFavor)} quedó a favor` : ''}`)
@@ -708,7 +705,7 @@ function GasolineraCreditoTab({ canWrite }: { canWrite: boolean }) {
     setEditForm({
       valor: String(num(a.valor)), fecha_abono: (a.fecha_abono ?? todayISO()).slice(0, 10),
       metodo_pago: (a.metodo_pago as MetodoPagoCombustible) || 'transferencia',
-      comprobante_url: a.comprobante_url ?? '', observaciones: a.observaciones ?? '',
+      comprobante: null, observaciones: a.observaciones ?? '', id_cuenta_bancaria: '',
     })
   }
   const guardarEditAbono = async () => {
@@ -719,9 +716,8 @@ function GasolineraCreditoTab({ canWrite }: { canWrite: boolean }) {
     try {
       await pagosCombustibleApi.editarAbonoGasolinera(editAbono.abono.id, {
         valor, fecha_abono: editForm.fecha_abono, metodo_pago: editForm.metodo_pago,
-        comprobante_url: editForm.comprobante_url.trim() || undefined,
         observaciones: editForm.observaciones.trim() || undefined,
-      })
+      }, editForm.comprobante)
       toast.success('Abono actualizado')
       const id = editAbono.idGasolinera
       setEditAbono(null)
@@ -820,7 +816,7 @@ function GasolineraCreditoTab({ canWrite }: { canWrite: boolean }) {
         onClose={() => setAbonoTarget(null)}
         footer={<>
           <Button variant="secondary" onClick={() => setAbonoTarget(null)}>Cancelar</Button>
-          <Button icon={<Banknote size={16} />} onClick={guardarAbono} disabled={savingAbono || !(Number(abonoForm.valor) > 0) || !abonoForm.comprobante_url.trim()}>
+          <Button icon={<Banknote size={16} />} onClick={guardarAbono} disabled={savingAbono || !(Number(abonoForm.valor) > 0)}>
             {savingAbono ? 'Guardando…' : 'Registrar abono'}
           </Button>
         </>}>
@@ -840,8 +836,11 @@ function GasolineraCreditoTab({ canWrite }: { canWrite: boolean }) {
             value={abonoForm.fecha_abono} onChange={e => setAbonoForm(s => ({ ...s, fecha_abono: e.target.value }))} />
           <Select label="Método de pago" options={METODO_OPTS}
             value={abonoForm.metodo_pago} onChange={e => setAbonoForm(s => ({ ...s, metodo_pago: e.target.value as MetodoPagoCombustible }))} />
-          <Input label="Comprobante (URL)" required placeholder="https://…/comprobante.png"
-            value={abonoForm.comprobante_url} onChange={e => setAbonoForm(s => ({ ...s, comprobante_url: e.target.value }))} />
+          {abonoForm.metodo_pago !== 'efectivo' && (
+            <CuentaBancariaSelect value={abonoForm.id_cuenta_bancaria} onChange={id => setAbonoForm(s => ({ ...s, id_cuenta_bancaria: id }))} />
+          )}
+          <ComprobanteInput style={{ gridColumn: '1 / -1' }}
+            value={abonoForm.comprobante} onChange={file => setAbonoForm(s => ({ ...s, comprobante: file }))} />
         </div>
       </Modal>
 
@@ -858,8 +857,8 @@ function GasolineraCreditoTab({ canWrite }: { canWrite: boolean }) {
             value={editForm.fecha_abono} onChange={e => setEditForm(s => ({ ...s, fecha_abono: e.target.value }))} />
           <Select label="Método de pago" options={METODO_OPTS}
             value={editForm.metodo_pago} onChange={e => setEditForm(s => ({ ...s, metodo_pago: e.target.value as MetodoPagoCombustible }))} />
-          <Input label="Comprobante (URL)" value={editForm.comprobante_url}
-            onChange={e => setEditForm(s => ({ ...s, comprobante_url: e.target.value }))} />
+          <ComprobanteInput value={editForm.comprobante} existingUrl={editAbono?.abono.comprobante_url}
+            onChange={file => setEditForm(s => ({ ...s, comprobante: file }))} />
           <Input label="Observaciones" value={editForm.observaciones}
             onChange={e => setEditForm(s => ({ ...s, observaciones: e.target.value }))} />
         </div>
@@ -930,7 +929,7 @@ function MesCard({ mesData, idGasolinera, canWrite, onEditAbono, onEliminarAbono
                       {canWrite && (
                         <td>
                           <div className="row" style={{ gap: 4 }}>
-                            {a.comprobante_url && <Button variant="ghost" size="sm" icon={<FileText size={12} />} title="Ver comprobante" onClick={() => window.open(a.comprobante_url!, '_blank', 'noopener,noreferrer')} />}
+                            {a.comprobante_url && <Button variant="ghost" size="sm" icon={<FileText size={12} />} title="Ver comprobante" onClick={() => abrirUrl(a.comprobante_url)} />}
                             <Button variant="ghost" size="sm" icon={<Pencil size={12} />} title="Editar" onClick={() => onEditAbono(idGasolinera, a)} />
                             <Button variant="ghost" size="sm" icon={<Trash2 size={12} />} title="Eliminar" onClick={() => onEliminarAbono(idGasolinera, a.id)} />
                           </div>

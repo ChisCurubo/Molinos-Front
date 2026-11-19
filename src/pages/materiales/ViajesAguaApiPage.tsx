@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ComprobanteInput } from '@/components/common/ComprobanteInput'
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Droplets, FileText, HandCoins, ImageIcon, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { Button, Card, Input, KpiTile, Modal, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
@@ -8,6 +9,7 @@ import { apiError } from '@/api/client'
 import { formatCOP, formatDate, todayISO } from '@/utils/format'
 import { materialApi, num, type AguaReporteMensual, type AguaViaje } from '@/api/material'
 import { PagoAguaTab } from './PagoAguaApiPage'
+import { abrirUrl } from '@/utils/safeUrl'
 
 const cop = formatCOP
 
@@ -79,7 +81,7 @@ export function ViajesAguaApiPage() {
   // Abonos (temporal en localStorage)
   const [abonos, setAbonos] = useState<AbonoAgua[]>(() => loadAbonos())
   const [abonoTarget, setAbonoTarget] = useState<number | null>(null)
-  const [formAbono, setFormAbono] = useState({ fecha: todayISO(), monto: '', nota: '', comprobante_url: '' })
+  const [formAbono, setFormAbono] = useState({ fecha: todayISO(), monto: '', nota: '', comprobante: null as File | null })
 
   const load = useCallback(() => {
     setLoading(true); setError(null)
@@ -138,12 +140,12 @@ export function ViajesAguaApiPage() {
   })
 
   // ── Abonos CRUD (temporal en localStorage) ──────────────
-  const abrirAbono = (idDueno: number) => { setAbonoTarget(idDueno); setFormAbono({ fecha: todayISO(), monto: '', nota: '', comprobante_url: '' }) }
+  const abrirAbono = (idDueno: number) => { setAbonoTarget(idDueno); setFormAbono({ fecha: todayISO(), monto: '', nota: '', comprobante: null }) }
   const guardarAbono = () => {
     if (abonoTarget == null || !formAbono.monto) { toast.error('Ingresa el monto del abono'); return }
     const nuevo: AbonoAgua = {
       id: Date.now(), id_dueno: abonoTarget, fecha: formAbono.fecha, monto: Number(formAbono.monto),
-      nota: formAbono.nota.trim() || undefined, comprobante_url: formAbono.comprobante_url.trim() || undefined,
+      nota: formAbono.nota.trim() || undefined, comprobante_url: formAbono.comprobante?.name,
     }
     setAbonos(prev => { const n = [nuevo, ...prev]; saveAbonos(n); return n })
     setAbonoTarget(null)
@@ -404,7 +406,7 @@ export function ViajesAguaApiPage() {
                               <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--green-700)' }} className="mono">{cop(a.monto)}</td>
                               <td style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>{a.nota || '—'}</td>
                               <td style={{ textAlign: 'center' }}>{a.comprobante_url
-                                ? <Button variant="ghost" size="sm" icon={<FileText size={13} />} title="Abrir comprobante" onClick={() => window.open(a.comprobante_url!, '_blank', 'noopener,noreferrer')} />
+                                ? <Button variant="ghost" size="sm" icon={<FileText size={13} />} title="Abrir comprobante" onClick={() => abrirUrl(a.comprobante_url)} />
                                 : <span style={{ color: 'var(--text-faint)' }}>—</span>}</td>
                               {canWrite && <td><Button variant="ghost" size="sm" icon={<Trash2 size={13} />} title="Eliminar abono" onClick={() => eliminarAbono(a.id)} /></td>}
                             </tr>
@@ -567,26 +569,8 @@ export function ViajesAguaApiPage() {
                 value={formAbono.monto} onChange={e => setFormAbono(f => ({ ...f, monto: e.target.value }))} helper="Puede ser parcial o de más." />
               <Input label="Nota (opcional)" placeholder="Transferencia Nequi…"
                 value={formAbono.nota} onChange={e => setFormAbono(f => ({ ...f, nota: e.target.value }))} />
-              <div className="field" style={{ gridColumn: '1 / -1' }}>
-                <label className="field__label">Comprobante (imagen o PDF)</label>
-                {formAbono.comprobante_url ? (
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '0.4rem 0.7rem', border: '1px solid var(--border)', borderRadius: 6, fontSize: 'var(--fs-sm)' }}>
-                    <FileText size={15} />
-                    <span className="mono">{formAbono.comprobante_url.split('/').pop()}</span>
-                    <button type="button" onClick={() => setFormAbono(f => ({ ...f, comprobante_url: '' }))}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}>
-                      <X size={14} />
-                    </button>
-                  </div>
-                ) : (
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.45rem 0.85rem', border: '1px dashed var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
-                    <ImageIcon size={15} /> Adjuntar comprobante
-                    <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
-                      onChange={e => { const file = e.target.files?.[0]; if (file) setFormAbono(f => ({ ...f, comprobante_url: `http://localhost/${file.name}` })) }} />
-                  </label>
-                )}
-                <span className="field__helper">Se sube desde tu dispositivo; por ahora se guarda la URL local (temporal).</span>
-              </div>
+              <ComprobanteInput style={{ gridColumn: '1 / -1' }} value={formAbono.comprobante} onChange={file => setFormAbono(f => ({ ...f, comprobante: file }))}
+                helper="Abono local temporal — aún no se envía al backend." />
             </div>
             {montoNum > 0 && dTarget && (
               <div className="callout" style={{ marginTop: '0.75rem' }}>

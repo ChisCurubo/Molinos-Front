@@ -15,7 +15,7 @@
 // '@/api/material' en la UI.
 // ════════════════════════════════════════════════════════════════════════════
 
-import { apiFetch, apiPost, apiPatch, apiDelete } from './client'
+import { apiFetch, apiPost, apiPatch, apiDelete, apiPostComprobante, apiPatchComprobante } from './client'
 
 type Dec = number | string | null
 
@@ -36,6 +36,7 @@ export interface MulaDespacho {
   foto_factura_url?: string | null
   pct_retencion?: Dec
   retencion?: Dec
+  retencion_fuente_manual?: Dec
   abono_neto?: Dec
   total_pagado?: Dec
   saldo_pendiente?: Dec
@@ -91,6 +92,9 @@ export interface CrearMulaPayload {
   concepto?: string
   factura_num?: string
   foto_factura_url?: string
+  // Override manual de retefuente — 0 fuerza que no aplique, >0 fuerza ese valor.
+  // Si no se manda, el backend calcula solo (1% transporte de carga).
+  retencion_fuente_manual?: number
 }
 export interface EditarMulaPayload {
   id_viaje?: number | null
@@ -99,15 +103,18 @@ export interface EditarMulaPayload {
   factura_num?: string
   foto_factura_url?: string
   valor?: number
+  // null vuelve al cálculo automático.
+  retencion_fuente_manual?: number | null
 }
 
 // Abono a nivel PROVEEDOR: se aplica en cascada (despacho más viejo primero)
 // sobre todas las cuentas abiertas de ese proveedor.
 export interface CrearAbonoMulaProveedorPayload {
   valor: number
-  comprobante_url: string
   fecha_abono?: string
   metodo_pago?: MetodoPagoMula | string
+  // Si se manda y la cuenta no está exenta, el backend cobra el 4×1000 solo.
+  id_cuenta_bancaria?: number
 }
 export interface CuentaAplicada {
   id_cuenta: number
@@ -124,7 +131,6 @@ export interface AbonoMulaProveedorResultado {
 // Edición/eliminación de un abono puntual ya creado (sin cambios de contrato).
 export interface EditarAbonoMulaPayload {
   valor?: number
-  comprobante_url?: string
   fecha_abono?: string
   metodo_pago?: MetodoPagoMula | string
   observaciones?: string
@@ -229,12 +235,12 @@ export const pagosMulasApi = {
 
   // Registrar abono a nivel PROVEEDOR: cascada sobre todas sus cuentas abiertas
   // (despacho más viejo primero). 409 si el proveedor no tiene deuda pendiente.
-  crearAbonoProveedor: (idProveedor: number, body: CrearAbonoMulaProveedorPayload) =>
-    apiPost<AbonoMulaProveedorResultado>(`/pagos/mulas/proveedor/${idProveedor}/abonos`, body),
+  crearAbonoProveedor: (idProveedor: number, body: CrearAbonoMulaProveedorPayload, comprobante?: File | null) =>
+    apiPostComprobante<AbonoMulaProveedorResultado>(`/pagos/mulas/proveedor/${idProveedor}/abonos`, body, comprobante),
 
   // Editar un abono existente.
-  editarAbono: (idAbono: number, body: EditarAbonoMulaPayload) =>
-    apiPatch<EditarAbonoMulaResultado>(`/pagos/mulas/abonos/${idAbono}`, body),
+  editarAbono: (idAbono: number, body: EditarAbonoMulaPayload, comprobante?: File | null) =>
+    apiPatchComprobante<EditarAbonoMulaResultado>(`/pagos/mulas/abonos/${idAbono}`, body, comprobante),
 
   // Eliminar un abono. 409 si el sobrepago que generó ya se usó.
   eliminarAbono: (idAbono: number) => apiDelete<EliminarAbonoMulaResultado>(`/pagos/mulas/abonos/${idAbono}`),

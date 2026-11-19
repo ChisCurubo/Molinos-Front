@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Calculator, ChevronDown, ChevronUp, FileText, ImageIcon, Landmark, Pencil, Percent, Plus, RefreshCw, TrendingUp, Trash2, Wallet, X,
+  Calculator, ChevronDown, ChevronUp, Landmark, Pencil, Percent, Plus, RefreshCw, TrendingUp, Trash2, Wallet,
 } from 'lucide-react'
 import { Badge, Button, Card, Input, KpiTile, Modal, Select, useToast } from '@/components/ui'
 import { PageHeader, ReadOnlyBanner } from '@/components/common/Page'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
+import { CuentaBancariaSelect } from '@/components/common/CatalogSelectors'
+import { ComprobanteInput } from '@/components/common/ComprobanteInput'
 import { useCanWrite } from '@/hooks/usePermissions'
 import { apiError } from '@/api/client'
 import { num } from '@/api/material'
@@ -146,9 +148,9 @@ export function PrestamosFinancierosApiPage() {
 
   // ── Registrar abono (real — POST /:id/abonos) ─────────────────
   const [abonoTarget, setAbonoTarget] = useState<PrestamoFinanciero | null>(null)
-  const [formAbono, setFormAbono] = useState({ fecha_abono: todayISO(), valor: '', metodo_pago: 'transferencia', observaciones: '', comprobante_url: '' })
+  const [formAbono, setFormAbono] = useState({ fecha_abono: todayISO(), valor: '', metodo_pago: 'transferencia', observaciones: '', comprobante: null as File | null, id_cuenta_bancaria: '' as number | '' })
   const [guardandoAbono, setGuardandoAbono] = useState(false)
-  const abrirAbono = (p: PrestamoFinanciero) => { setAbonoTarget(p); setFormAbono({ fecha_abono: todayISO(), valor: '', metodo_pago: 'transferencia', observaciones: '', comprobante_url: '' }) }
+  const abrirAbono = (p: PrestamoFinanciero) => { setAbonoTarget(p); setFormAbono({ fecha_abono: todayISO(), valor: '', metodo_pago: 'transferencia', observaciones: '', comprobante: null, id_cuenta_bancaria: '' }) }
   const guardarAbono = async () => {
     if (!abonoTarget) return
     const valor = Number(formAbono.valor) || 0
@@ -158,8 +160,9 @@ export function PrestamosFinancierosApiPage() {
     try {
       await pagosPrestamosApi.abonar(abonoTarget.id, {
         valor, fecha_abono: formAbono.fecha_abono, metodo_pago: formAbono.metodo_pago,
-        comprobante_url: formAbono.comprobante_url.trim() || undefined, observaciones: formAbono.observaciones.trim() || undefined,
-      })
+        observaciones: formAbono.observaciones.trim() || undefined,
+        id_cuenta_bancaria: formAbono.metodo_pago === 'efectivo' || formAbono.id_cuenta_bancaria === '' ? undefined : formAbono.id_cuenta_bancaria,
+      }, formAbono.comprobante)
       toast.success('Abono registrado')
       setAbonoTarget(null); reload(); invalidateDeudaPrestamos(); invalidateBalanceTesoreria(); recargarMovimientos(abonoTarget.id)
     } catch (e) {
@@ -376,27 +379,13 @@ export function PrestamosFinancierosApiPage() {
                 value={formAbono.valor} onChange={e => setFormAbono(v => ({ ...v, valor: e.target.value }))} helper={`Máximo ${cop(saldoActual)}.`} />
               <Select label="Método de pago" value={formAbono.metodo_pago} onChange={e => setFormAbono(v => ({ ...v, metodo_pago: e.target.value }))}
                 options={[{ value: 'transferencia', label: 'Transferencia' }, { value: 'efectivo', label: 'Efectivo' }, { value: 'nequi', label: 'Nequi' }, { value: 'deposito', label: 'Depósito' }, { value: 'otro', label: 'Otro' }]} />
+              {formAbono.metodo_pago !== 'efectivo' && (
+                <CuentaBancariaSelect value={formAbono.id_cuenta_bancaria} onChange={id => setFormAbono(v => ({ ...v, id_cuenta_bancaria: id }))} />
+              )}
               <Input label="Observaciones (opcional)" placeholder="Cuota mensual de septiembre…" style={{ gridColumn: '1 / -1' }}
                 value={formAbono.observaciones} onChange={e => setFormAbono(v => ({ ...v, observaciones: e.target.value }))} />
-              <div className="field" style={{ gridColumn: '1 / -1' }}>
-                <label className="field__label">Comprobante (imagen o PDF, opcional)</label>
-                {formAbono.comprobante_url ? (
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '0.4rem 0.7rem', border: '1px solid var(--border)', borderRadius: 6, fontSize: 'var(--fs-sm)' }}>
-                    <FileText size={15} />
-                    <span className="mono">{formAbono.comprobante_url.split('/').pop()}</span>
-                    <button type="button" onClick={() => setFormAbono(v => ({ ...v, comprobante_url: '' }))}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}>
-                      <X size={14} />
-                    </button>
-                  </div>
-                ) : (
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.45rem 0.85rem', border: '1px dashed var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
-                    <ImageIcon size={15} /> Adjuntar comprobante
-                    <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
-                      onChange={e => { const file = e.target.files?.[0]; if (file) setFormAbono(v => ({ ...v, comprobante_url: `http://localhost/${file.name}` })) }} />
-                  </label>
-                )}
-              </div>
+              <ComprobanteInput label="Comprobante (imagen o PDF, opcional)" style={{ gridColumn: '1 / -1' }}
+                value={formAbono.comprobante} onChange={file => setFormAbono(v => ({ ...v, comprobante: file }))} />
             </div>
             {valorNum > 0 && abonoTarget && (
               <div className="callout" style={{ marginTop: '0.75rem' }}>

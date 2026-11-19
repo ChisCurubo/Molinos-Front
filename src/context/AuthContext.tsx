@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import type { Role, User } from '@/types'
 import { seedUsers } from '@/data/seed'
 import { authApi } from '@/api/auth'
-import { SESSION_KEY } from '@/auth/session'
+import { apiErrorMessage } from '@/api/client'
+import { SESSION_KEY, clearLocalData } from '@/auth/session'
 
 interface StoredUser extends User {
   password: string
@@ -10,21 +11,22 @@ interface StoredUser extends User {
 
 interface Session {
   user: User
-  token: string
+  /** El backend exige cambiar la contraseña antes de usar el sistema. */
+  mustChangePassword?: boolean
   /** true si la sesión proviene del login mock local (accesos rápidos / demo). */
   mock?: boolean
 }
 
 interface AuthContextValue {
   user: User | null
-  token: string | null
+  /** true si el backend marcó la contraseña como temporal/rotada. */
+  mustChangePassword: boolean
+  clearMustChange: () => void
   users: User[]
   /** true mientras se valida el token persistido contra el backend al arrancar. */
   initializing: boolean
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>
   logout: () => void
-  requestReset: (email: string) => { ok: boolean; token?: string; error?: string }
-  resetPassword: (email: string, token: string, newPassword: string) => { ok: boolean; error?: string }
   addUser: (u: Omit<StoredUser, 'id'>) => void
   updateUser: (id: string, patch: Partial<StoredUser>) => void
   removeUser: (id: string) => void
@@ -42,19 +44,23 @@ function loadUsers(): StoredUser[] {
   return seedUsers
 }
 
-// Token "JWT" simulado (no criptográfico — solo para el prototipo)
-function fakeJwt(user: User): string {
-  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
-  const payload = btoa(JSON.stringify({ sub: user.id, role: user.role, name: user.nombre, iat: Date.now() }))
-  return `${header}.${payload}.molinos-signature`
+// Mapea el id_rol (numérico, confiable — FK a la tabla Roles) devuelto por el
+// backend a los roles de la app. El nombre humano del rol (ej.
+// "Angela_exportaciones") NO se parsea: cambia de redacción libremente y no
+// es un contrato estable. Si el id_rol no es ninguno de los conocidos, usa el
+// rol conocido por email (seedUsers) y por defecto 'administrador'.
+const ID_ROL_MAP: Record<number, Role> = {
+  1: 'administrador',
+  2: 'financiero',
+  3: 'materiales',
+  4: 'materiales', // Valeria: escribe en /material
+  5: 'materiales', // Ginna: escribe en /material
+  6: 'importaciones',
 }
-
-// Mapea el rol devuelto por el backend a los roles de la app. Si no coincide,
-// usa el rol conocido por email (seedUsers) y por defecto 'administrador'.
-function resolveRole(apiRol: string | undefined, fallback: Role | undefined): Role {
-  const r = apiRol?.toLowerCase().trim()
-  if (r === 'administrador' || r === 'materiales' || r === 'financiero') return r
-  return fallback ?? 'administrador'
+// Un id_rol desconocido NO recibe permisos: devuelve null y el login se rechaza
+// (antes caía en 'administrador', dando el panel completo a roles no mapeados).
+function resolveRole(idRol: number | undefined): Role | null {
+  return idRol != null && ID_ROL_MAP[idRol] ? ID_ROL_MAP[idRol] : null
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -81,17 +87,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return false
     }
   })
-  // tokens de restablecimiento activos (email -> código)
-  const [resetTokens, setResetTokens] = useState<Record<string, string>>({})
-
   useEffect(() => {
     localStorage.setItem(USERS_KEY, JSON.stringify(users))
   }, [users])
 
   useEffect(() => {
     if (session) {
-      // Solo se persiste la sesión; el token viaja dentro de ella. El cliente API
-      // (client.ts / withFallback.ts) lo lee vía getStoredToken().
+      // Solo el perfil (usuario/rol). El token vive en una cookie httpOnly del backend.
       localStorage.setItem(SESSION_KEY, JSON.stringify(session))
     } else {
       localStorage.removeItem(SESSION_KEY)
@@ -131,75 +133,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [users],
   )
 
-  // Login contra el backend real (POST /auth/login). Si el backend no responde,
-  // cae a la autenticación mock local (seedUsers) para no bloquear el prototipo.
+  // Login contra el backend real (POST /auth/login). Ya no hay fallback local:
+  // si el backend rechaza o no responde, el login falla (no se puede entrar
+  // con las contraseñas quemadas de seedUsers).
   const login = useCallback<AuthContextValue['login']>(
     async (email, password) => {
       const correo = email.trim().toLowerCase()
-
-      // 1) Intento real: guarda el token del backend para las llamadas a la API.
       try {
         const resp = await authApi.login(correo, password)
-        if (resp?.token) {
-          const seed = users.find((u) => u.email.toLowerCase() === correo)
-          const role = resolveRole(resp.user?.rol, seed?.role)
-          const user: User = {
-            id: resp.user?.id != null ? String(resp.user.id) : (seed?.id ?? correo),
-            nombre: resp.user?.nombres ?? seed?.nombre ?? correo,
-            email: resp.user?.correo ?? correo,
-            role,
-            activo: true,
-            ultimoAcceso: new Date().toISOString().slice(0, 10),
-          }
-          setSession({ user, token: resp.token, mock: false })
-          return { ok: true }
+        if (!resp?.usuario) return { ok: false, error: 'Credenciales inválidas.' }
+        const seed = users.find((u) => u.email.toLowerCase() === correo)
+        const role = resolveRole(resp.usuario?.id_rol)
+        if (!role) {
+          void authApi.logout()
+          return { ok: false, error: 'Su rol no tiene acceso a esta aplicación. Contacte al administrador.' }
         }
-      } catch {
-        // Backend no disponible o credenciales rechazadas → intentar mock abajo.
+        const user: User = {
+          id: resp.usuario?.id != null ? String(resp.usuario.id) : (seed?.id ?? correo),
+          nombre: seed?.nombre ?? resp.usuario?.username ?? correo,
+          email: resp.usuario?.username ?? correo,
+          role,
+          activo: true,
+          ultimoAcceso: new Date().toISOString().slice(0, 10),
+        }
+        setSession({ user, mock: false, mustChangePassword: Boolean(resp.usuario.debe_cambiar_password) })
+        return { ok: true }
+      } catch (err) {
+        return { ok: false, error: apiErrorMessage(err) }
       }
-
-      // 2) Fallback mock local.
-      const found = users.find((u) => u.email.toLowerCase() === correo)
-      if (!found) return { ok: false, error: 'No existe una cuenta con ese correo.' }
-      if (!found.activo) return { ok: false, error: 'La cuenta está desactivada. Contacte al administrador.' }
-      if (found.password !== password) return { ok: false, error: 'La contraseña es incorrecta.' }
-      const { password: _pw, ...publicUser } = found
-      const withAccess: User = { ...publicUser, ultimoAcceso: new Date().toISOString().slice(0, 10) }
-      setUsers((prev) => prev.map((u) => (u.id === found.id ? { ...u, ultimoAcceso: withAccess.ultimoAcceso } : u)))
-      setSession({ user: withAccess, token: fakeJwt(withAccess), mock: true })
-      return { ok: true }
     },
     [users],
   )
 
-  const logout = useCallback(() => setSession(null), [])
-
-  const requestReset = useCallback<AuthContextValue['requestReset']>(
-    (email) => {
-      const found = users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase())
-      if (!found) return { ok: false, error: 'No existe una cuenta con ese correo.' }
-      const code = Math.floor(100000 + Math.random() * 900000).toString()
-      setResetTokens((prev) => ({ ...prev, [found.email.toLowerCase()]: code }))
-      return { ok: true, token: code }
-    },
-    [users],
-  )
-
-  const resetPassword = useCallback<AuthContextValue['resetPassword']>(
-    (email, token, newPassword) => {
-      const key = email.trim().toLowerCase()
-      if (resetTokens[key] !== token) return { ok: false, error: 'El código de verificación no es válido.' }
-      if (newPassword.length < 6) return { ok: false, error: 'La contraseña debe tener al menos 6 caracteres.' }
-      setUsers((prev) => prev.map((u) => (u.email.toLowerCase() === key ? { ...u, password: newPassword } : u)))
-      setResetTokens((prev) => {
-        const next = { ...prev }
-        delete next[key]
-        return next
-      })
-      return { ok: true }
-    },
-    [resetTokens],
-  )
+  const logout = useCallback(() => {
+    // Recarga completa: borra datos locales y también el estado en memoria de los contextos.
+    void authApi.logout().finally(() => { clearLocalData(); window.location.replace('/login') })
+    setSession(null)
+  }, [])
+  const clearMustChange = useCallback(() => setSession((s) => (s ? { ...s, mustChangePassword: false } : s)), [])
 
   const addUser = useCallback<AuthContextValue['addUser']>((u) => {
     setUsers((prev) => [{ ...u, id: `u${Date.now()}` }, ...prev])
@@ -216,12 +187,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextValue>(
     () => ({
       user: session?.user ?? null,
-      token: session?.token ?? null,
+      mustChangePassword: Boolean(session?.mustChangePassword),
+      clearMustChange,
       users: publicUsers,
       initializing,
-      login, logout, requestReset, resetPassword, addUser, updateUser, removeUser,
+      login, logout, addUser, updateUser, removeUser,
     }),
-    [session, publicUsers, initializing, login, logout, requestReset, resetPassword, addUser, updateUser, removeUser],
+    [session, publicUsers, initializing, login, logout, addUser, updateUser, removeUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

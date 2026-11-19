@@ -12,6 +12,13 @@ import { pagosCxpApi, type CxpCuenta, type CategoriaCxp, type LibroGastoItem } f
 import { pagosApi, type Proveedor } from '@/api/pagos'
 import { pagosGastosDirectosApi, type GastoDirectoPayload, type MetodoPagoGastoDirecto } from '@/api/pagosGastosDirectos'
 import { invalidateBalanceTesoreria } from '@/hooks/useBalanceTesoreria'
+import { CuentasBancariasTab } from './CuentasBancariasTab'
+import { ImpuestosInfoTab } from './ImpuestosInfoTab'
+import { InversionPlantaTab } from './InversionPlantaTab'
+import { CuentaBancariaSelect } from '@/components/common/CatalogSelectors'
+import { ComprobanteInput } from '@/components/common/ComprobanteInput'
+import { useCuentasBancarias } from '@/hooks/useCuentasBancarias'
+import { abrirUrl } from '@/utils/safeUrl'
 
 const CATEGORIA_GASTO_DIRECTO = 'Gasto Directo'
 
@@ -27,12 +34,6 @@ const cop = formatCOP
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
-const ESTADO_OPTS = [
-  { value: 'todos',     label: 'Todos los estados' },
-  { value: 'pendiente', label: 'Pendiente' },
-  { value: 'parcial',   label: 'Parcial' },
-  { value: 'pagado',    label: 'Pagado' },
-]
 const ESTADO_BADGE: Record<string, { label: string; cls: string }> = {
   pagado:    { label: 'Pagado',    cls: 'badge--success' },
   parcial:   { label: 'Parcial',   cls: 'badge--info'    },
@@ -58,7 +59,7 @@ function useCategoriasCxp() {
   return { data, loading, reload: load }
 }
 
-type PageTab = 'cuentas' | 'categorias' | 'gastos'
+type PageTab = 'cuentas' | 'categorias' | 'gastos' | 'cuentas_bancarias' | 'impuestos' | 'inversion'
 
 export function CxPApiPage() {
   const canWrite = useCanWrite('finanzas')
@@ -77,7 +78,7 @@ export function CxPApiPage() {
   const categorias = useCategoriasCxp()
   const proveedoresPagables = useProveedoresPagables()
   const [fCategoria, setFCategoria] = useState<number | ''>('')
-  const [fEstado, setFEstado] = useState('todos')
+  const [cuentaSubTab, setCuentaSubTab] = useState<'pendientes' | 'abonadas'>('pendientes')
   const [page, setPage] = useState(1)
 
   const [resp, setResp] = useState<{ cuentas: CxpCuenta[]; pagination: { page: number; limit: number; total: number; total_pages: number } } | null>(null)
@@ -85,15 +86,21 @@ export function CxPApiPage() {
   const [error, setError] = useState<string | null>(null)
   const load = useCallback(() => {
     setLoading(true); setError(null)
-    pagosCxpApi.getMensual({ mes, anio, id_categoria: fCategoria || undefined, estado: fEstado !== 'todos' ? fEstado : undefined, page, limit: 50 })
+    pagosCxpApi.getMensual({ mes, anio, id_categoria: fCategoria || undefined, estado: cuentaSubTab === 'abonadas' ? 'pagado' : undefined, page, limit: 50 })
       .then(setResp)
       .catch(e => setError(apiError(e).message))
       .finally(() => setLoading(false))
-  }, [mes, anio, fCategoria, fEstado, page])
-  useEffect(() => { setPage(1) }, [mes, anio, fCategoria, fEstado])
+  }, [mes, anio, fCategoria, cuentaSubTab, page])
+  useEffect(() => { setPage(1) }, [mes, anio, fCategoria, cuentaSubTab])
   useEffect(() => { load() }, [load])
 
-  const cuentas = resp?.cuentas ?? []
+  // En "Pendientes" el backend trae todos los estados (igual que antes con el
+  // filtro "Todos") — se ocultan las ya pagadas acá para no duplicar con la
+  // pestaña "Abonadas", que sí filtra por estado=pagado en el servidor.
+  const cuentas = useMemo(() => {
+    const todas = resp?.cuentas ?? []
+    return cuentaSubTab === 'pendientes' ? todas.filter(c => c.estado !== 'pagado') : todas
+  }, [resp, cuentaSubTab])
   const totales = useMemo(() => ({
     total: cuentas.reduce((s, c) => s + num(c.valor_total), 0),
     pagado: cuentas.reduce((s, c) => s + num(c.valor_pagado), 0),
@@ -149,7 +156,12 @@ export function CxPApiPage() {
         <button role="tab" aria-selected={tab === 'gastos'} className={`segment__btn ${tab === 'gastos' ? 'segment__btn--active' : ''}`} onClick={() => setTab('gastos')}>Gastos</button>
         <button role="tab" aria-selected={tab === 'cuentas'} className={`segment__btn ${tab === 'cuentas' ? 'segment__btn--active' : ''}`} onClick={() => setTab('cuentas')}>Cuentas</button>
         <button role="tab" aria-selected={tab === 'categorias'} className={`segment__btn ${tab === 'categorias' ? 'segment__btn--active' : ''}`} onClick={() => setTab('categorias')}>Categorías</button>
+        <button role="tab" aria-selected={tab === 'cuentas_bancarias'} className={`segment__btn ${tab === 'cuentas_bancarias' ? 'segment__btn--active' : ''}`} onClick={() => setTab('cuentas_bancarias')}>Cuentas bancarias</button>
+        <button role="tab" aria-selected={tab === 'impuestos'} className={`segment__btn ${tab === 'impuestos' ? 'segment__btn--active' : ''}`} onClick={() => setTab('impuestos')}>Impuestos</button>
+        <button role="tab" aria-selected={tab === 'inversion'} className={`segment__btn ${tab === 'inversion' ? 'segment__btn--active' : ''}`} onClick={() => setTab('inversion')}>Inversión Planta</button>
       </div>
+
+      {tab === 'impuestos' && <ImpuestosInfoTab modulo="gastos" />}
 
       {tab === 'cuentas' && (
         <>
@@ -164,7 +176,7 @@ export function CxPApiPage() {
           </div>
 
           <div className="grid grid--kpi" style={{ marginBottom: '1rem' }}>
-            <KpiTile label="Cuentas" value={resp?.pagination.total ?? 0} icon={<Wallet size={16} />} accent="emerald" />
+            <KpiTile label="Cuentas" value={cuentas.length} icon={<Wallet size={16} />} accent="emerald" />
             <KpiTile label="Total"   value={cop(totales.total)} accent="green" />
             <KpiTile label="Pagado"  value={cop(totales.pagado)} accent="brown" />
             <KpiTile label="Saldo"   value={cop(totales.saldo)} accent="rose" />
@@ -187,13 +199,16 @@ export function CxPApiPage() {
               <option value="">Todas las categorías</option>
               {categorias.data.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
-            <select className="field__select" style={{ maxWidth: '11rem' }} value={fEstado} onChange={e => setFEstado(e.target.value)}>
-              {ESTADO_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            <div className="segment" role="tablist" style={{ padding: '0.15rem' }}>
+              <button role="tab" aria-selected={cuentaSubTab === 'pendientes'} className={`segment__btn ${cuentaSubTab === 'pendientes' ? 'segment__btn--active' : ''}`}
+                style={{ padding: '0.4rem 0.8rem', fontSize: 'var(--fs-sm)', minHeight: 'auto' }} onClick={() => setCuentaSubTab('pendientes')}>Pendientes</button>
+              <button role="tab" aria-selected={cuentaSubTab === 'abonadas'} className={`segment__btn ${cuentaSubTab === 'abonadas' ? 'segment__btn--active' : ''}`}
+                style={{ padding: '0.4rem 0.8rem', fontSize: 'var(--fs-sm)', minHeight: 'auto' }} onClick={() => setCuentaSubTab('abonadas')}>Abonadas</button>
+            </div>
             <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={load} style={{ marginLeft: 'auto' }}>Refrescar</Button>
           </div>
 
-          <Card title={`Cuentas por pagar (${resp?.pagination.total ?? 0})`}>
+          <Card title={`Cuentas por pagar — ${cuentaSubTab === 'abonadas' ? 'Abonadas' : 'Pendientes'} (${cuentas.length})`}>
             <div className="table-wrap">
               <table className="data-table">
                 <thead><tr>
@@ -210,7 +225,9 @@ export function CxPApiPage() {
                       {error} · <button onClick={load} style={{ background: 'none', border: 'none', color: 'var(--amber-700)', textDecoration: 'underline', cursor: 'pointer' }}>Reintentar</button>
                     </td></tr>
                   ) : cuentas.length === 0 ? (
-                    <tr><td colSpan={canWrite ? 4 : 3} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Sin cuentas para {MESES[mes - 1]} {anio}.</td></tr>
+                    <tr><td colSpan={canWrite ? 4 : 3} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                      Sin cuentas {cuentaSubTab === 'abonadas' ? 'abonadas' : 'pendientes'} para {MESES[mes - 1]} {anio}.
+                    </td></tr>
                   ) : cuentas.map(c => {
                     const eb = ESTADO_BADGE[c.estado] ?? { label: c.estado, cls: 'badge--neutral' }
                     const saldo = num(c.saldo)
@@ -281,6 +298,10 @@ export function CxPApiPage() {
 
       {tab === 'gastos' && <LibroGastosTab canWrite={canWrite} />}
 
+      {tab === 'cuentas_bancarias' && <CuentasBancariasTab canWrite={canWrite} />}
+
+      {tab === 'inversion' && <InversionPlantaTab canWrite={canWrite} />}
+
       {/* ── Modal: Nueva cuenta suelta ── */}
       <Modal open={nuevaModal} title="Nueva cuenta por pagar a proveedor (suelta)" onClose={() => setNuevaModal(false)}
         footer={<>
@@ -335,7 +356,7 @@ const METODO_GASTO_OPTS: { value: MetodoPagoGastoDirecto; label: string }[] = [
   { value: 'deposito',      label: 'Depósito' },
   { value: 'otro',          label: 'Otro' },
 ]
-const emptyGastoDirectoForm = () => ({ concepto: '', monto: '', comprobante_url: '', fecha: todayISO(), metodo_pago: 'efectivo' as MetodoPagoGastoDirecto, observaciones: '' })
+const emptyGastoDirectoForm = () => ({ concepto: '', monto: '', comprobante: null as File | null, fecha: todayISO(), metodo_pago: 'efectivo' as MetodoPagoGastoDirecto, observaciones: '', id_cuenta_bancaria: '' as number | '' })
 
 function colorCategoria(categoria: string, color?: string | null, idx = 0): string {
   if (color) return color
@@ -355,16 +376,18 @@ function LibroGastosTab({ canWrite }: { canWrite: boolean }) {
     setMes(d.getMonth() + 1); setAnio(d.getFullYear())
   }
   const [fCategoria, setFCategoria] = useState('')
+  const [fCuentaBancaria, setFCuentaBancaria] = useState<number | ''>('')
+  const cuentasBancarias = useCuentasBancarias()
   const [data, setData] = useState<LibroGastoItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const load = useCallback(() => {
     setLoading(true); setError(null)
-    pagosCxpApi.getLibroGastos(mes, anio)
+    pagosCxpApi.getLibroGastos(mes, anio, fCuentaBancaria || undefined)
       .then(r => setData(Array.isArray(r) ? r : []))
       .catch(e => setError(apiError(e).message))
       .finally(() => setLoading(false))
-  }, [mes, anio])
+  }, [mes, anio, fCuentaBancaria])
   useEffect(() => { load() }, [load])
 
   // El `id` que trae /pagos/vistas/libro-gastos para una fila "Gasto Directo"
@@ -407,21 +430,22 @@ function LibroGastosTab({ canWrite }: { canWrite: boolean }) {
   const abrirEdit = (g: LibroGastoItem) => {
     const idReal = idRealPorAbono.get(g.id)
     if (idReal == null) { toast.error('No se pudo identificar este gasto directo — refresca e intenta de nuevo.'); return }
-    setForm({ concepto: g.concepto, monto: String(num(g.monto)), comprobante_url: g.comprobante_url ?? '', fecha: g.fecha.slice(0, 10), metodo_pago: g.metodo_pago as MetodoPagoGastoDirecto, observaciones: g.observaciones ?? '' })
+    setForm({ concepto: g.concepto, monto: String(num(g.monto)), comprobante: null, fecha: g.fecha.slice(0, 10), metodo_pago: g.metodo_pago as MetodoPagoGastoDirecto, observaciones: g.observaciones ?? '', id_cuenta_bancaria: '' })
     setModal({ ...g, id: idReal })
   }
   const guardar = async () => {
-    if (!form.concepto.trim() || !(Number(form.monto) > 0) || !form.comprobante_url.trim()) {
-      toast.error('Concepto, monto y comprobante son obligatorios'); return
+    if (!form.concepto.trim() || !(Number(form.monto) > 0)) {
+      toast.error('Concepto y monto son obligatorios'); return
     }
     const body: GastoDirectoPayload = {
-      concepto: form.concepto.trim(), monto: Number(form.monto), comprobante_url: form.comprobante_url.trim(),
+      concepto: form.concepto.trim(), monto: Number(form.monto),
       fecha: form.fecha || undefined, metodo_pago: form.metodo_pago, observaciones: form.observaciones.trim() || undefined,
+      id_cuenta_bancaria: form.metodo_pago === 'efectivo' || form.id_cuenta_bancaria === '' ? undefined : form.id_cuenta_bancaria,
     }
     setSaving(true)
     try {
-      if (modal === 'nuevo') { await pagosGastosDirectosApi.crear(body); toast.success('Gasto directo registrado') }
-      else if (modal) { await pagosGastosDirectosApi.actualizar(modal.id, body); toast.success('Gasto directo actualizado') }
+      if (modal === 'nuevo') { await pagosGastosDirectosApi.crear(body, form.comprobante); toast.success('Gasto directo registrado') }
+      else if (modal) { await pagosGastosDirectosApi.actualizar(modal.id, body, form.comprobante); toast.success('Gasto directo actualizado') }
       setModal(null); load(); invalidateBalanceTesoreria()
     } catch (e) { toast.error(apiError(e).message) } finally { setSaving(false) }
   }
@@ -454,6 +478,11 @@ function LibroGastosTab({ canWrite }: { canWrite: boolean }) {
           <option value="">Todas las categorías</option>
           {categoriasPresentes.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
+        <select className="field__select" style={{ maxWidth: '13rem' }} value={fCuentaBancaria}
+          onChange={e => setFCuentaBancaria(e.target.value === '' ? '' : Number(e.target.value))}>
+          <option value="">Todas las cuentas</option>
+          {cuentasBancarias.data.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
         <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={load}>Refrescar</Button>
         {canWrite && <Button size="sm" icon={<Plus size={16} />} onClick={abrirNuevo} style={{ marginLeft: 'auto' }}>Nuevo gasto directo</Button>}
       </div>
@@ -462,28 +491,29 @@ function LibroGastosTab({ canWrite }: { canWrite: boolean }) {
         <div className="table-wrap">
           <table className="data-table">
             <thead><tr>
-              <th>Fecha</th><th>Categoría</th><th style={{ minWidth: '14rem' }}>Concepto</th><th>Beneficiario</th>
+              <th>Fecha</th><th>Categoría</th><th style={{ minWidth: '14rem' }}>Concepto</th><th>Beneficiario</th><th>Cuenta bancaria</th>
               <th style={{ textAlign: 'right' }}>Monto</th><th>Comprobante</th>{canWrite && <th></th>}
             </tr></thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={canWrite ? 7 : 6} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Cargando…</td></tr>
+                <tr><td colSpan={canWrite ? 8 : 7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Cargando…</td></tr>
               ) : error ? (
-                <tr><td colSpan={canWrite ? 7 : 6} style={{ textAlign: 'center', padding: '2rem', color: 'var(--rose-600)' }}>
+                <tr><td colSpan={canWrite ? 8 : 7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--rose-600)' }}>
                   {error} · <button onClick={load} style={{ background: 'none', border: 'none', color: 'var(--amber-700)', textDecoration: 'underline', cursor: 'pointer' }}>Reintentar</button>
                 </td></tr>
               ) : filtrados.length === 0 ? (
-                <tr><td colSpan={canWrite ? 7 : 6} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Sin gastos para {MESES[mes - 1]} {anio}.</td></tr>
+                <tr><td colSpan={canWrite ? 8 : 7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Sin gastos para {MESES[mes - 1]} {anio}.</td></tr>
               ) : filtrados.map((g, i) => (
                 <tr key={g.id}>
                   <td style={{ whiteSpace: 'nowrap' }}>{formatDate(g.fecha)}</td>
                   <td><span className="badge" style={{ background: colorCategoria(g.categoria, g.color, i) + '22', color: colorCategoria(g.categoria, g.color, i) }}>{g.categoria}</span></td>
                   <td>{g.concepto}</td>
                   <td style={{ color: 'var(--text-faint)' }}>{g.beneficiario ?? '—'}</td>
+                  <td style={{ color: 'var(--text-faint)' }}>{g.cuenta_bancaria ?? '—'}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--rose-600)' }} className="mono">{cop(num(g.monto))}</td>
                   <td>
                     {g.comprobante_url
-                      ? <Button variant="ghost" size="sm" icon={<FileText size={13} />} onClick={() => window.open(g.comprobante_url!, '_blank', 'noopener,noreferrer')} />
+                      ? <Button variant="ghost" size="sm" icon={<FileText size={13} />} onClick={() => abrirUrl(g.comprobante_url)} />
                       : <span style={{ color: 'var(--text-faint)' }}>—</span>}
                   </td>
                   {canWrite && (
@@ -511,7 +541,7 @@ function LibroGastosTab({ canWrite }: { canWrite: boolean }) {
       <Modal open={modal !== null} title={modal === 'nuevo' ? 'Nuevo gasto directo' : 'Editar gasto directo'} onClose={() => setModal(null)}
         footer={<>
           <Button variant="secondary" onClick={() => setModal(null)}>Cancelar</Button>
-          <Button onClick={guardar} disabled={saving || !form.concepto.trim() || !(Number(form.monto) > 0) || !form.comprobante_url.trim()}>{saving ? 'Guardando…' : 'Guardar'}</Button>
+          <Button onClick={guardar} disabled={saving || !form.concepto.trim() || !(Number(form.monto) > 0)}>{saving ? 'Guardando…' : 'Guardar'}</Button>
         </>}>
         <div className="callout" style={{ marginBottom: '1rem', fontSize: 'var(--fs-sm)' }}>
           Gasto ya pagado en el momento (parqueadero, peaje, lavado…) — se crea como cuenta por pagar ya cancelada, con su abono, en un solo paso.
@@ -521,7 +551,13 @@ function LibroGastosTab({ canWrite }: { canWrite: boolean }) {
           <Input label="Monto" type="number" mono step="1000" required value={form.monto} onChange={e => setForm(s => ({ ...s, monto: e.target.value }))} />
           <Select label="Método de pago" value={form.metodo_pago} onChange={e => setForm(s => ({ ...s, metodo_pago: e.target.value as MetodoPagoGastoDirecto }))} options={METODO_GASTO_OPTS} />
           <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm(s => ({ ...s, fecha: e.target.value }))} />
-          <Input label="Comprobante (URL)" required style={{ gridColumn: '1 / -1' }} placeholder="https://…/comprobante.png" value={form.comprobante_url} onChange={e => setForm(s => ({ ...s, comprobante_url: e.target.value }))} />
+          {form.metodo_pago !== 'efectivo' && (
+            <CuentaBancariaSelect value={form.id_cuenta_bancaria} onChange={id => setForm(s => ({ ...s, id_cuenta_bancaria: id }))}
+              helper="Si la cuenta no está exenta, el banco cobra el 4×1000 automático sobre este monto." />
+          )}
+          <ComprobanteInput style={{ gridColumn: '1 / -1' }} value={form.comprobante}
+            existingUrl={modal && modal !== 'nuevo' ? modal.comprobante_url : null}
+            onChange={file => setForm(s => ({ ...s, comprobante: file }))} />
           <Input label="Observaciones (opcional)" style={{ gridColumn: '1 / -1' }} value={form.observaciones} onChange={e => setForm(s => ({ ...s, observaciones: e.target.value }))} />
         </div>
       </Modal>
