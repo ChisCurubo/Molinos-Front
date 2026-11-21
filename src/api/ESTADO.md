@@ -1,6 +1,6 @@
 # Estado de integración API — Molinos de Colombia ERP
 
-Base URL: `http://localhost:3005/api/v1` (configurada en `.env.local`)
+Base URL: `/api/v1` (mismo origen; el proxy de Vite reenvía a VITE_BACK_URL, ver `.env.example`)
 
 ## Infraestructura creada
 
@@ -16,7 +16,7 @@ Base URL: `http://localhost:3005/api/v1` (configurada en `.env.local`)
 | `src/api/nomina.ts` | ✅ | Empleados, préstamos empleado, turnos, plantas, vistas saldo |
 | `src/api/pagos.ts` | ✅ | CxP, CxC categorías, préstamos financieros, proveedores, gastos |
 | `src/api/pagosAlquileres.ts` | ✅ | Tipos de alquiler + alquileres + abonos (`/pagos/alquileres`) |
-| `.env.local` | ✅ | `VITE_API_URL=http://localhost:3005/api/v1` |
+| `.env.local` | ✅ | `VITE_API_URL` vacío (usa `/api/v1`) |
 
 ## Páginas nuevas conectadas 100% a la API (en paralelo a las mock)
 

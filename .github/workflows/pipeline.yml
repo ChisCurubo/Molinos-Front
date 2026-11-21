@@ -1,0 +1,117 @@
+# Pipeline del frontend: solo corre en cada push a main (o a mano desde la pestaña Actions).
+# No toca MySQL. 1) revisa tipos, compila y valida Caddy  2) si todo pasa, despliega en la VM molinos-front  3) prueba producción.
+name: Frontend · probar y desplegar
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: frontend-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  pruebas:
+    name: Compilar y probar
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci --no-audit --no-fund
+
+      - name: Revisión de tipos (TypeScript)
+        run: npx tsc -b
+
+      - name: Compilar (como en el servidor)
+        env:
+          VITE_API_URL: /api/v1
+        run: |
+          npx vite build
+          test -s dist/index.html
+          grep -rq "localhost:3005" dist/assets && { echo "El build trae localhost:3005 quemado"; exit 1; } || true
+
+      - name: Validar la configuración de Caddy
+        run: |
+          docker run --rm -v "$PWD/deploy:/etc/caddy:ro" \
+            -e SITE=ejemplo.sslip.io -e PUBLIC_IP=1.2.3.4 -e BACK_UPSTREAM=10.0.1.10:3005 \
+            caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile.oracle --adapter caddyfile
+
+      - name: Construir la imagen Docker del servidor
+        run: docker build -f deploy/Dockerfile -t molinos-front:ci .
+
+      - name: Auditoría de dependencias (solo informa)
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=critical
+
+  e2e:
+    name: Pruebas e2e (Playwright, solo informan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true   # cuando estén estables, quitar esta línea para que bloqueen el despliegue
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reporte-playwright
+          path: playwright-report/
+          retention-days: 7
+
+  desplegar:
+    name: Desplegar en Oracle (molinos-front)
+    needs: pruebas
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: produccion
+      url: ${{ vars.PUBLIC_URL }}
+    steps:
+      - name: Preparar llave SSH de despliegue
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      # La llave solo puede ejecutar "sudo /opt/molinos/update.sh" en la VM (forced command).
+      - name: Desplegar (git pull + build + reinicio de Caddy en la VM)
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: ssh -i ~/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 "ubuntu@$DEPLOY_HOST" desplegar
+
+      - name: Prueba de humo en producción
+        env:
+          URL: ${{ vars.PUBLIC_URL }}
+        run: |
+          set -e
+          for i in $(seq 1 20); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$URL")" = 200 ] && break; sleep 6
+          done
+          curl -fs --max-time 10 "$URL" | grep -q '<div id="root"' && echo "OK página"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$URL/pagos")" = 200 ] && echo "OK rutas de React"
+          curl -fs --max-time 10 "$URL/api/v1/health" | grep -q '"db":"ok"' && echo "OK API por el proxy"
+
+      - name: Borrar la llave
+        if: always()
+        run: rm -f ~/.ssh/id_deploy
