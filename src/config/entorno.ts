@@ -17,4 +17,4 @@ export const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) || 
 // un fallo de la API debe verse como fallo, no como datos inventados.
 export const MOCKS_PERMITIDOS = MODO === 'local' && import.meta.env.DEV
 
-console.info(`[molinos] modo=${MODO} · api=${API_BASE}${MODO === 'local' ? ' → proxy a VITE_BACK_URL (def. http://localhost:3005)' : ''}`)
+console.info(`[molinos] modo=${MODO} · api=${API_BASE}${MODO === 'local' ? ' → proxy a VITE_BACK_URL' : ''}`)

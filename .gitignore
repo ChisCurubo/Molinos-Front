@@ -77,3 +77,7 @@ test-results/
 
 # Caddyfile.local es config de despliegue (sin secretos), no un override personal
 !deploy/Caddyfile.local
+
+# Salida compilada de tsc -b (tsconfig.node.json); Vite la preferiria sobre vite.config.ts
+vite.config.js
+*.stackdump
