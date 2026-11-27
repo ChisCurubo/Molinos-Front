@@ -81,6 +81,7 @@ function AppRoutes() {
         <Route path="/materiales/viajes-material-api" element={<ProtectedRoute module="materiales"><ViajesMaterialApiPage /></ProtectedRoute>} />
         <Route path="/materiales/pago-material-api" element={<ProtectedRoute module="materiales"><PagoMaterialApiPage /></ProtectedRoute>} />
         <Route path="/materiales/pago-mulas-api" element={<ProtectedRoute module="materiales"><PagoMulasApiPage /></ProtectedRoute>} />
+        <Route path="/materiales/reporte-viaje" element={<Navigate to="/materiales/plantillas" replace />} />
         <Route path="/materiales/plantillas" element={<ProtectedRoute module="materiales"><PlantillasMaterialPage /></ProtectedRoute>} />
         <Route path="/materiales/pago-agua-api" element={<Navigate to="/materiales/viajes-agua-api" replace />} />
         <Route path="/materiales/pago-flete-api" element={<Navigate to="/materiales/volquetas-api" replace />} />
